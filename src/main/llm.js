@@ -1,8 +1,11 @@
 'use strict';
-// OpenAI-compatible 客户端：chat / embeddings / whisper 转写 / 模型列表
-// 全部基于 Node 全局 fetch，无 SDK 依赖。
+// 多协议模型客户端：chat 走 provider adapter；Compatible 自动模式复用 IRIS 同款 AI SDK；
+// embeddings / whisper 维持 OpenAI-compatible 的直接请求。
 const fs = require('fs');
 const path = require('path');
+const adapters = require('./providerAdapters');
+const compatibleKeyCursors = new Map();
+let compatibleSdkPromise = null;
 
 function headers(provider, extra = {}) {
   const h = { ...extra };
@@ -18,7 +21,8 @@ function headers(provider, extra = {}) {
 function usable(p) {
   if (!p || p.enabled === false) return false;
   if (p.type === 'local') return true;
-  return Boolean(p.baseUrl && (p.keyless || p.apiKey));
+  if (p.authType === 'oauth' && p.oauthProvider) return Boolean(p.baseUrl && p.model);
+  return Boolean(p.baseUrl && (p.keyless || p.apiKey || (Array.isArray(p.apiKeys) && p.apiKeys.some(Boolean))));
 }
 
 // 计费网络时只保留本机 provider
@@ -30,7 +34,7 @@ function localOnlyFilter(providers, localOnly) {
 // 灾备：按数组顺序逐个尝试，全部失败抛最后一个错误
 async function withFailover(providers, fn) {
   const list = (Array.isArray(providers) ? providers : [providers]).filter(usable);
-  if (!list.length) throw new Error('没有可用的 provider（请在设置中配置，或保留内置免费模型）');
+  if (!list.length) throw new Error('没有可用的 provider（请在「设置 → 能力」选择 Provider Source、连接 OAuth 或配置自定义接口）');
   let lastErr;
   for (const p of list) {
     try {
@@ -119,24 +123,153 @@ function throttled(provider, fn) {
   return run;
 }
 
-async function chat(provider, messages, { json = false, temperature = 0.2 } = {}) {
-  const body = { model: provider.model, messages, temperature };
-  if (json) body.response_format = { type: 'json_object' };
+async function chatCompletion(provider, messages, options = {}) {
+  provider = await require('./providerOAuth').resolveProviderRecord(provider);
+  if (adapters.protocolOf(provider) === adapters.PROTOCOLS.OPENAI_COMPATIBLE && provider.responseMode !== 'manual') {
+    return throttled(provider, () => compatibleChatCompletion(provider, messages, options));
+  }
+  const body = adapters.buildChatRequest(provider, messages, options);
   const res = await throttled(provider, () =>
     fetchWithRetry(
-      apiUrl(provider, '/chat/completions'),
+      adapters.endpointFor(provider, 'chat'),
       {
         method: 'POST',
-        headers: headers(provider, { 'Content-Type': 'application/json' }),
+        headers: adapters.requestHeaders(provider, { 'Content-Type': 'application/json' }),
         body: JSON.stringify(body),
       },
       'chat'
     )
   );
   const data = await res.json();
-  const content = data.choices?.[0]?.message?.content;
-  if (typeof content !== 'string') throw new Error('chat 返回缺少 content');
-  return content;
+  const completion = adapters.parseChatResponse(provider, data);
+  if (!completion.text && !completion.toolCalls.length) throw new Error('chat 返回缺少文本或工具调用');
+  return {
+    ...completion,
+    provider: {
+      name: provider.name || provider.baseUrl,
+      model: provider.model,
+      protocol: adapters.protocolOf(provider),
+    },
+  };
+}
+
+function compatibleModules() {
+  compatibleSdkPromise ||= Promise.all([import('ai'), import('@ai-sdk/openai-compatible')]);
+  return compatibleSdkPromise;
+}
+
+function compatibleMessages(messages) {
+  const output = [];
+  for (const message of messages) {
+    if (message.role === 'system') continue;
+    if (message.role === 'user') {
+      output.push({ role: 'user', content: String(message.content || '') });
+      continue;
+    }
+    if (message.role === 'assistant') {
+      if (!Array.isArray(message.toolCalls) || !message.toolCalls.length) {
+        output.push({ role: 'assistant', content: String(message.content || '') });
+        continue;
+      }
+      const content = [];
+      if (message.content) content.push({ type: 'text', text: String(message.content) });
+      for (const call of message.toolCalls) {
+        content.push({ type: 'tool-call', toolCallId: call.id, toolName: call.name, input: call.arguments || {} });
+      }
+      output.push({ role: 'assistant', content });
+      continue;
+    }
+    output.push({
+      role: 'tool',
+      content: [{
+        type: 'tool-result',
+        toolCallId: message.toolCallId,
+        toolName: message.name || 'tool',
+        output: { type: 'text', value: String(message.content || '') },
+      }],
+    });
+  }
+  return output;
+}
+
+function compatibleKeys(provider) {
+  const keys = Array.isArray(provider.apiKeys)
+    ? provider.apiKeys.map((key) => String(key).trim()).filter(Boolean)
+    : String(provider.apiKey || '').split(/\r?\n/).map((key) => key.trim()).filter(Boolean);
+  return keys.length ? keys : [''];
+}
+
+async function compatibleChatCompletion(provider, messages, options = {}) {
+  const [{ generateText, jsonSchema, tool }, { createOpenAICompatible }] = await compatibleModules();
+  const keys = compatibleKeys(provider);
+  const cursorKey = provider.id || provider.name || provider.baseUrl;
+  const start = compatibleKeyCursors.get(cursorKey) || 0;
+  compatibleKeyCursors.set(cursorKey, (start + 1) % keys.length);
+  const candidates = [...keys.slice(start), ...keys.slice(0, start)];
+  let failure;
+  for (const apiKey of candidates) {
+    try {
+      const customAuth = provider.authHeader && String(provider.authHeader).toLowerCase() !== 'authorization';
+      const customHeaders = adapters.requestHeaders({ ...provider, apiKey, apiKeys: [] });
+      const requestUrl = adapters.endpointFor(provider, 'chat');
+      const sdk = createOpenAICompatible({
+        name: String(provider.name || 'epilogue-compatible').replace(/[^a-z0-9_-]/gi, '-').toLowerCase(),
+        baseURL: String(provider.baseUrl || '').replace(/\/+$/, ''),
+        ...(apiKey && !customAuth ? { apiKey } : {}),
+        headers: customHeaders,
+        fetch: async (input, init = {}) => {
+          const headers = new Headers(init.headers);
+          for (const [key, value] of Object.entries(customHeaders)) headers.set(key, value);
+          if (apiKey && provider.authHeader) headers.set(provider.authHeader, `${provider.authPrefix ?? 'Bearer '}${apiKey}`);
+          let body = init.body;
+          if (typeof body === 'string' && body.trim() && provider.body) {
+            body = JSON.stringify(adapters.mergeBody(JSON.parse(body), provider.body));
+          }
+          const incoming = String(input);
+          const defaultUrl = adapters.joinEndpointUrl(provider.baseUrl, '/chat/completions');
+          return fetch(incoming === defaultUrl ? requestUrl : input, { ...init, headers, body });
+        },
+      });
+      const definitions = Object.fromEntries((options.tools || []).map((definition) => [definition.name, tool({
+        description: definition.description,
+        inputSchema: jsonSchema(definition.parameters || { type: 'object', properties: {} }),
+      })]));
+      const system = messages.filter((message) => message.role === 'system').map((message) => String(message.content || '')).filter(Boolean).join('\n\n');
+      const result = await generateText({
+        model: sdk.languageModel(provider.model),
+        ...(system ? { system } : {}),
+        messages: compatibleMessages(messages),
+        ...(Object.keys(definitions).length ? { tools: definitions } : {}),
+        ...(options.maxTokens ? { maxOutputTokens: options.maxTokens } : {}),
+        ...(Number.isFinite(options.temperature) ? { temperature: options.temperature } : {}),
+        ...(options.signal ? { abortSignal: options.signal } : {}),
+        maxRetries: 0,
+      });
+      const inputTokens = Number(result.usage?.inputTokens || 0);
+      const outputTokens = Number(result.usage?.outputTokens || 0);
+      const toolCalls = (result.toolCalls || []).map((call, index) => ({
+        id: String(call.toolCallId || call.id || `call_${index + 1}`),
+        name: String(call.toolName || call.name || ''),
+        arguments: call.input && typeof call.input === 'object' ? call.input : {},
+      })).filter((call) => call.name);
+      return {
+        text: result.text || '',
+        toolCalls,
+        finishReason: result.finishReason || (toolCalls.length ? 'tool_calls' : 'stop'),
+        usage: { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens },
+        provider: { name: provider.name || provider.baseUrl, model: provider.model, protocol: adapters.protocolOf(provider) },
+      };
+    } catch (error) {
+      failure = error;
+      if (options.signal?.aborted) break;
+    }
+  }
+  throw failure || new Error('Compatible provider request failed');
+}
+
+async function chat(provider, messages, options = {}) {
+  const completion = await chatCompletion(provider, messages, options);
+  return completion.text;
 }
 
 // 从模型输出中提取 JSON（容忍 ```json 围栏与前后杂文）
@@ -198,14 +331,21 @@ async function transcribe(provider, filePath) {
 }
 
 async function listModels(provider) {
-  const res = await fetchWithRetry(apiUrl(provider, '/models'), { headers: headers(provider) }, 'list models', 1);
+  provider = await require('./providerOAuth').resolveProviderRecord(provider);
+  const res = await fetchWithRetry(
+    adapters.endpointFor(provider, 'models'),
+    { headers: adapters.requestHeaders(provider) },
+    'list models',
+    1
+  );
   const data = await res.json();
-  return (data.data || []).map((m) => m.id);
+  return adapters.parseModelsResponse(data);
 }
 
 // 连通性测试：单次请求、短超时、不重试不节流（一次定生死，且不排同主机节流队列）
 const TEST_TIMEOUT = 15000;
 async function testProvider(type, provider) {
+  provider = await require('./providerOAuth').resolveProviderRecord(provider);
   const t0 = Date.now();
   const post = async (endpoint, body, check) => {
     let res;
@@ -225,11 +365,23 @@ async function testProvider(type, provider) {
     if (!check(data)) throw new Error('返回格式异常（非 OpenAI-compatible 响应）');
   };
   if (type === 'chat') {
-    await post(
-      '/chat/completions',
-      { model: provider.model, messages: [{ role: 'user', content: 'Reply with exactly: OK' }], max_tokens: 8 },
-      (d) => typeof d.choices?.[0]?.message?.content === 'string'
-    );
+    let res;
+    try {
+      res = await fetch(adapters.endpointFor(provider, 'chat'), {
+        method: 'POST',
+        headers: adapters.requestHeaders(provider, { 'Content-Type': 'application/json' }),
+        body: JSON.stringify(
+          adapters.buildChatRequest(provider, [{ role: 'user', content: 'Reply with exactly: OK' }], { maxTokens: 8, temperature: 0 })
+        ),
+        signal: AbortSignal.timeout(TEST_TIMEOUT),
+      });
+    } catch (e) {
+      if (e.name === 'TimeoutError' || e.name === 'AbortError') throw new Error(`test timeout：${TEST_TIMEOUT / 1000}s 无响应`);
+      throw e;
+    }
+    if (!res.ok) await raise(res, 'test');
+    const completion = adapters.parseChatResponse(provider, await res.json());
+    if (!completion.text && !completion.toolCalls.length) throw new Error('返回格式异常（模型协议响应为空）');
   } else if (type === 'embeddings') {
     await post('/embeddings', { model: provider.model, input: ['ping'] }, (d) => Array.isArray(d.data?.[0]?.embedding));
   } else {
@@ -240,6 +392,7 @@ async function testProvider(type, provider) {
 
 // 数组灾备版入口
 const chatF = (providers, messages, opts) => withFailover(providers, (p) => chat(p, messages, opts));
+const chatCompletionF = (providers, messages, opts) => withFailover(providers, (p) => chatCompletion(p, messages, opts));
 const chatJsonF = (providers, messages, opts) => withFailover(providers, (p) => chatJson(p, messages, opts));
 const embedF = (providers, texts) =>
   withFailover(
@@ -257,8 +410,8 @@ const embedF = (providers, texts) =>
 const transcribeF = (providers, filePath) => withFailover(providers, (p) => transcribe(p, filePath));
 
 module.exports = {
-  chat, chatJson, embed, transcribe, listModels,
-  chatF, chatJsonF, embedF, transcribeF,
+  chat, chatCompletion, chatJson, embed, transcribe, listModels,
+  chatF, chatCompletionF, chatJsonF, embedF, transcribeF,
   usable, withFailover, embeddingsConfigured, parseJsonLoose, localOnlyFilter, testProvider,
-  TIMEOUTS, // 导出供测试覆盖
+  TIMEOUTS, adapters, // 导出供测试覆盖
 };

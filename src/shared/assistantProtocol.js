@@ -5,6 +5,45 @@
 
 const MAX_ACTIONS_PER_TURN = 4;
 const TOOL_NAMES = ['update_settings', 'search_files', 'get_status'];
+const WRITE_TOOLS = new Set(['update_settings']);
+
+// 中立工具描述：provider adapter 会分别转换成 OpenAI tools、Responses
+// functions 或 Anthropic input_schema。参数约束也在执行前由下方白名单复验。
+const TOOL_DEFINITIONS = [
+  {
+    name: 'search_files',
+    description: 'Search the local Epilogue index for files that match a natural-language query. This is read-only.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        query: { type: 'string', minLength: 1, maxLength: 500 },
+        mode: { type: 'string', enum: ['match', 'ai'] },
+      },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'get_status',
+    description: 'Read index statistics and a privacy-safe summary of current Epilogue settings.',
+    parameters: { type: 'object', additionalProperties: false, properties: {} },
+  },
+  {
+    name: 'update_settings',
+    description: 'Propose a safe update to the allow-listed Epilogue settings. The user must approve before it is applied.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        patch: {
+          type: 'object',
+          description: 'Only include settings the user explicitly asked to change.',
+        },
+      },
+      required: ['patch'],
+    },
+  },
+];
 
 // 助手可改的设置白名单（providers/apiKey、路径类字段一律禁止）
 const SETTINGS_SCHEMA = {
@@ -79,10 +118,24 @@ function parseAssistantOutput(text, parseJsonLoose) {
   return { reply: obj.reply, actions };
 }
 
+function normalizeNativeToolCalls(calls) {
+  return (Array.isArray(calls) ? calls : [])
+    .filter((call) => call && typeof call === 'object' && TOOL_NAMES.includes(call.name))
+    .slice(0, MAX_ACTIONS_PER_TURN)
+    .map((call, index) => ({
+      id: String(call.id || `call_${index + 1}`),
+      tool: call.name,
+      args: call.arguments && typeof call.arguments === 'object' ? call.arguments : {},
+    }));
+}
+
 module.exports = {
   SETTINGS_SCHEMA,
   MAX_ACTIONS_PER_TURN,
   TOOL_NAMES,
+  TOOL_DEFINITIONS,
+  WRITE_TOOLS,
   sanitizeSettingsPatch,
   parseAssistantOutput,
+  normalizeNativeToolCalls,
 };

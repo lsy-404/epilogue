@@ -20,6 +20,138 @@ function esc(s) {
   return d.innerHTML;
 }
 
+/* ---------- WinUI flyout / popup menu ---------- */
+let activeFlyout = null;
+
+function closeFlyout({ focus = false } = {}) {
+  if (!activeFlyout) return;
+  const { anchor } = activeFlyout;
+  $('#flyoutLayer').replaceChildren();
+  anchor?.setAttribute?.('aria-expanded', 'false');
+  if (focus) anchor?.focus?.();
+  activeFlyout = null;
+}
+
+function positionFlyout(menu, anchor) {
+  const rect = anchor.getBoundingClientRect();
+  const margin = 10;
+  const width = Math.max(rect.width || 0, Math.min(360, window.innerWidth - margin * 2));
+  menu.style.minWidth = `${Math.min(width, window.innerWidth - margin * 2)}px`;
+  const box = menu.getBoundingClientRect();
+  let left = rect.left;
+  let top = rect.bottom + 5;
+  if (left + box.width > window.innerWidth - margin) left = window.innerWidth - box.width - margin;
+  if (top + box.height > window.innerHeight - margin) top = Math.max(margin, rect.top - box.height - 5);
+  menu.style.left = `${Math.max(margin, left)}px`;
+  menu.style.top = `${Math.max(margin, top)}px`;
+}
+
+function renderFlyoutOptions(query = '') {
+  if (!activeFlyout) return;
+  const needle = query.trim().toLowerCase();
+  const visible = activeFlyout.items
+    .map((item, index) => ({ item, index }))
+    .filter(({ item }) => !needle || `${item.label} ${item.detail || ''}`.toLowerCase().includes(needle))
+    .slice(0, 160);
+  const list = activeFlyout.menu.querySelector('.flyout-options');
+  list.innerHTML = visible.length ? visible.map(({ item, index }) => `<button type="button" role="menuitem" class="win-menu-item${item.danger ? ' danger' : ''}" data-flyout-index="${index}" ${item.disabled ? 'disabled' : ''}>
+    <span class="win-menu-check">${item.checked ? '✓' : ''}</span>
+    <span>${esc(item.label)}</span>
+    <span class="win-menu-detail">${esc(item.detail || '')}</span>
+  </button>`).join('') : `<div class="flyout-empty">${esc(t('menu_no_results'))}</div>`;
+}
+
+function openFlyout(anchor, items, options = {}) {
+  closeFlyout();
+  const menu = document.createElement('div');
+  menu.className = 'win-menu-flyout';
+  menu.setAttribute('role', 'menu');
+  if (options.label) menu.setAttribute('aria-label', options.label);
+  menu.innerHTML = `${options.searchable ? `<input class="flyout-search" type="search" placeholder="${esc(t('menu_search'))}" aria-label="${esc(t('menu_search'))}" />` : ''}<div class="flyout-options"></div>`;
+  $('#flyoutLayer').append(menu);
+  anchor?.setAttribute?.('aria-expanded', 'true');
+  activeFlyout = { anchor, items, menu, options };
+  renderFlyoutOptions();
+  positionFlyout(menu, anchor);
+  const first = menu.querySelector('.flyout-search, .win-menu-item:not(:disabled)');
+  requestAnimationFrame(() => first?.focus());
+}
+
+$('#flyoutLayer').addEventListener('input', (e) => {
+  if (e.target.matches('.flyout-search')) renderFlyoutOptions(e.target.value);
+});
+$('#flyoutLayer').addEventListener('click', (e) => {
+  const button = e.target.closest('[data-flyout-index]');
+  if (!button || !activeFlyout) return;
+  const item = activeFlyout.items[+button.dataset.flyoutIndex];
+  closeFlyout();
+  Promise.resolve(item?.action?.()).catch((error) => {
+    $('#saveHint').textContent = t('err', { msg: String(error?.message || error).slice(0, 200) });
+  });
+});
+$('#flyoutLayer').addEventListener('keydown', (e) => {
+  if (!activeFlyout) return;
+  if (e.key === 'Escape') { e.preventDefault(); closeFlyout({ focus: true }); return; }
+  const buttons = [...activeFlyout.menu.querySelectorAll('.win-menu-item:not(:disabled)')];
+  const index = buttons.indexOf(document.activeElement);
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    const step = e.key === 'ArrowDown' ? 1 : -1;
+    buttons[(index + step + buttons.length) % buttons.length]?.focus();
+  }
+  if ((e.key === 'Enter' || e.key === ' ') && document.activeElement?.matches?.('.win-menu-item')) {
+    e.preventDefault(); document.activeElement.click();
+  }
+});
+document.addEventListener('pointerdown', (e) => {
+  if (activeFlyout && !activeFlyout.menu.contains(e.target) && !activeFlyout.anchor?.contains?.(e.target)) closeFlyout();
+}, true);
+window.addEventListener('resize', () => closeFlyout());
+$('.main').addEventListener('scroll', () => closeFlyout(), { passive: true });
+
+function syncSelectProxy(select) {
+  const proxy = select.nextElementSibling?.matches?.('.select-flyout-button') ? select.nextElementSibling : null;
+  if (!proxy) return;
+  proxy.firstChild.textContent = select.selectedOptions[0]?.textContent || '';
+  proxy.disabled = select.disabled;
+}
+
+function upgradeSelect(select) {
+  if (select.dataset.flyoutReady === '1') { syncSelectProxy(select); return; }
+  select.dataset.flyoutReady = '1';
+  select.classList.add('native-select-source');
+  const proxy = document.createElement('button');
+  proxy.type = 'button';
+  proxy.className = `select-flyout-button${select.classList.contains('provider-protocol') ? ' provider-protocol' : ''}`;
+  proxy.append(document.createTextNode(''));
+  proxy.setAttribute('aria-haspopup', 'menu');
+  proxy.setAttribute('aria-expanded', 'false');
+  select.after(proxy);
+  proxy.addEventListener('click', () => openFlyout(proxy, [...select.options].map((option) => ({
+    label: option.textContent,
+    value: option.value,
+    checked: option.value === select.value,
+    disabled: option.disabled,
+    action: () => {
+      if (select.value === option.value) return;
+      select.value = option.value;
+      syncSelectProxy(select);
+      select.dispatchEvent(new Event('input', { bubbles: true }));
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    },
+  })), { label: select.title || select.previousElementSibling?.textContent || '' }));
+  select.addEventListener('change', () => syncSelectProxy(select));
+  syncSelectProxy(select);
+}
+
+function upgradeSelects(root = document) {
+  root.querySelectorAll('select').forEach(upgradeSelect);
+}
+
+function syncSelectProxies() {
+  document.querySelectorAll('select').forEach(syncSelectProxy);
+}
+
 /* ---------- i18n ---------- */
 function applyI18n() {
   const lang = currentSettings?.language || 'zh';
@@ -29,6 +161,8 @@ function applyI18n() {
   for (const el of document.querySelectorAll('[data-i18n]')) el.textContent = t(el.dataset.i18n);
   for (const el of document.querySelectorAll('[data-i18n-ph]')) el.placeholder = t(el.dataset.i18nPh);
   for (const el of document.querySelectorAll('[data-i18n-html]')) el.innerHTML = t(el.dataset.i18nHtml);
+  syncSelectProxies();
+  if (providerSourceLoaded) renderProviderSourceList($('#providerSourceSearch').value);
 }
 
 /* ---------- 导航 ---------- */
@@ -51,7 +185,7 @@ api.onAutoScan((found) => {
 });
 
 function fileItem(r, extra = '') {
-  return `<li>
+  return `<li data-file-path="${esc(r.filePath)}">
     <span class="badge">${esc(r.kind || '?')}</span>
     <div class="item-main">
       <div class="item-title">${esc(r.fileName)}</div>
@@ -65,6 +199,20 @@ function fileItem(r, extra = '') {
 document.body.addEventListener('click', (e) => {
   const reveal = e.target.closest('[data-reveal]');
   if (reveal) api.reveal(reveal.dataset.reveal);
+});
+
+document.body.addEventListener('contextmenu', (e) => {
+  const row = e.target.closest('[data-file-path]');
+  if (!row) return;
+  e.preventDefault();
+  const filePath = row.dataset.filePath;
+  const removable = row.closest('#libraryList') !== null;
+  const point = { getBoundingClientRect: () => ({ left: e.clientX, right: e.clientX, top: e.clientY, bottom: e.clientY, width: 0, height: 0 }) };
+  openFlyout(point, [
+    { label: t('locate'), action: () => api.reveal(filePath) },
+    { label: t('menu_copy_path'), action: () => api.copyText(filePath) },
+    ...(removable ? [{ label: t('menu_remove_index'), danger: true, action: async () => { await api.storeRemove(filePath); refreshLibrary(); } }] : []),
+  ], { label: t('menu_file_actions') });
 });
 
 /* ---------- 总览：英雄搜索 + 统计 ---------- */
@@ -256,8 +404,34 @@ let chatHistory = []; // {role, content, events?, error?} —— 只存内存，
 let chatBusy = false;
 
 function eventBadge(ev) {
-  const key = { settings_updated: 'ev_settings', search: 'ev_search' }[ev.type];
-  return key ? `<span class="badge gold">${esc(t(key, { detail: ev.detail || '' }))}</span>` : '';
+  const key = {
+    settings_updated: 'ev_settings',
+    search: 'ev_search',
+    status_read: 'ev_status',
+    model_used: 'ev_model',
+    approval_requested: 'ev_approval',
+    approval_accepted: 'ev_approved',
+    approval_rejected: 'ev_rejected',
+  }[ev.type];
+  return key ? `<span class="badge ${ev.type === 'model_used' ? '' : 'gold'}">${esc(t(key, { detail: ev.detail || '' }))}</span>` : '';
+}
+
+function approvalCard(approval) {
+  const done = approval.status && approval.status !== 'pending';
+  const changes = (approval.changes || []).map((change) => `<div class="approval-change">
+    <code>${esc(change.path)}</code><span>→</span><strong>${esc(typeof change.value === 'string' ? change.value : JSON.stringify(change.value))}</strong>
+  </div>`).join('');
+  return `<div class="approval-card${done ? ' resolved' : ''}" data-approval-card="${esc(approval.id)}">
+    <div class="approval-copy">
+      <strong>${esc(t('chat_review_title'))}</strong>
+      <span>${esc(approval.summary || approval.tool)}</span>
+      ${changes ? `<div class="approval-changes">${changes}</div>` : ''}
+    </div>
+    <div class="approval-actions">
+      <button class="mini-btn" data-approval-id="${esc(approval.id)}" data-approved="false" ${done ? 'disabled' : ''}>${esc(t('chat_reject'))}</button>
+      <button class="mini-btn primary" data-approval-id="${esc(approval.id)}" data-approved="true" ${done ? 'disabled' : ''}>${esc(t('chat_approve'))}</button>
+    </div>
+  </div>`;
 }
 
 function renderChat() {
@@ -270,6 +444,7 @@ function renderChat() {
         <div class="msg-role">${m.role === 'user' ? 'YOU' : 'EPILOGUE'}</div>
         <div class="msg-body">${esc(m.content)}</div>
         ${m.events?.length ? `<div class="msg-events">${m.events.map(eventBadge).join('')}</div>` : ''}
+        ${m.approvals?.length ? `<div class="msg-approvals">${m.approvals.map(approvalCard).join('')}</div>` : ''}
       </div>`
     )
     .join('');
@@ -289,9 +464,9 @@ async function sendChat() {
   try {
     // 只送 role/content，截最近条目由主进程负责
     const r = await api.assistantChat(chatHistory.filter((m) => !m.error).map((m) => ({ role: m.role, content: m.content })));
-    chatHistory.push({ role: 'assistant', content: r.reply, events: r.events });
+    chatHistory.push({ role: 'assistant', content: r.reply, events: r.events || [], approvals: r.approvals || [], trace: r.trace });
     // 助手改了设置 → 同步整个界面（语言可能都变了）
-    if (r.events.some((ev) => ev.type === 'settings_updated')) {
+    if ((r.events || []).some((ev) => ev.type === 'settings_updated')) {
       currentSettings = await api.getSettings();
       applyI18n();
       loadSettingsForm(currentSettings);
@@ -317,6 +492,42 @@ $('#chatInput').addEventListener('keydown', (e) => {
 $('#btnChatClear').addEventListener('click', () => {
   chatHistory = [];
   renderChat();
+});
+
+$('#chatLog').addEventListener('click', async (e) => {
+  const button = e.target.closest('[data-approval-id]');
+  if (!button || chatBusy) return;
+  const id = button.dataset.approvalId;
+  const approved = button.dataset.approved === 'true';
+  const owner = chatHistory.find((message) => message.approvals?.some((approval) => approval.id === id));
+  const approval = owner?.approvals?.find((item) => item.id === id);
+  if (!approval || (approval.status && approval.status !== 'pending')) return;
+  approval.status = 'resolving';
+  chatBusy = true;
+  renderChat();
+  try {
+    const result = await api.assistantResolveApproval(id, approved);
+    approval.status = approved ? 'approved' : 'rejected';
+    chatHistory.push({ role: 'assistant', content: result.reply, events: result.events || [] });
+    if ((result.events || []).some((event) => event.type === 'settings_updated')) {
+      currentSettings = await api.getSettings();
+      applyI18n();
+      loadSettingsForm(currentSettings);
+    }
+  } catch (error) {
+    approval.status = 'error';
+    chatHistory.push({ role: 'assistant', content: t('err', { msg: error.message }), error: true });
+  }
+  chatBusy = false;
+  renderChat();
+});
+
+document.querySelectorAll('[data-quick-prompt]').forEach((button) => {
+  button.addEventListener('click', () => {
+    $('#chatInput').value = button.textContent.trim();
+    autosizeChatInput();
+    $('#chatInput').focus();
+  });
 });
 
 // 聊天输入：禁止拖动改为自适应高度（上限 140px，发送后复位）
@@ -490,9 +701,242 @@ for (const btn of document.querySelectorAll('.tab-btn')) {
 }
 
 /* ---------- 设置：Provider 灾备列表 ---------- */
+/* ---------- IRIS Provider Source / OAuth ---------- */
+let providerSourceCatalog = [];
+let providerSourceLoaded = false;
+
+function showProviderSourceError(message = '') {
+  $('#providerSourceError').textContent = message;
+  $('#providerSourceError').classList.toggle('hidden', !message);
+}
+
+function renderProviderSourceList(query = '') {
+  const needle = query.trim().toLowerCase();
+  const matches = providerSourceCatalog.filter((source) => !needle || [
+    source.id, source.name, source.package, ...(source.env || []),
+  ].some((value) => String(value || '').toLowerCase().includes(needle))).slice(0, 240);
+  $('#providerSourceList').innerHTML = matches.length ? matches.map((source) => `
+    <button type="button" class="provider-source-option" data-source-id="${esc(source.id)}" ${source.available ? '' : 'disabled'}>
+      <span class="provider-source-option-main"><strong>${esc(source.name)}</strong><span>${esc(source.id)} · ${esc(source.package)}</span></span>
+      <span class="provider-source-meta">${t('source_models', { n: source.modelCount })}</span>
+      <span class="provider-source-add">${source.available ? t('source_select') : t('source_unavailable')}</span>
+    </button>`).join('') : `<div class="flyout-empty">${esc(t('menu_no_results'))}</div>`;
+}
+
+async function loadProviderSources(force = false) {
+  $('#providerSourceList').innerHTML = `<div class="flyout-empty">${esc(t('source_loading'))}</div>`;
+  try {
+    const result = await api.providerCatalog(force);
+    providerSourceCatalog = result.providers || [];
+    providerSourceLoaded = true;
+    showProviderSourceError(result.catalogError || '');
+    renderProviderSourceList($('#providerSourceSearch').value);
+  } catch (error) {
+    showProviderSourceError(t('err', { msg: String(error.message || error).slice(0, 200) }));
+    renderProviderSourceList($('#providerSourceSearch').value);
+  }
+}
+
+async function loadOAuthAccounts(provider) {
+  const list = document.querySelector(`[data-oauth-accounts="${provider}"]`);
+  try {
+    const accounts = await api.oauthAccounts(provider);
+    list.innerHTML = accounts.length ? accounts.map((account) => `<div class="oauth-account-row">
+      <span>${esc(account.label)}</span>
+      <span class="account-expiry">${t('oauth_expires', { time: new Date(account.expires).toLocaleString() })}</span>
+      <button type="button" class="mini-btn danger" data-oauth-remove="${esc(provider)}" data-oauth-id="${esc(account.id)}">${t('oauth_disconnect')}</button>
+    </div>`).join('') : `<div class="flyout-empty">${esc(t('oauth_empty'))}</div>`;
+  } catch (error) {
+    list.innerHTML = `<div class="form-error">${esc(String(error.message || error))}</div>`;
+  }
+}
+
+async function openProviderSource() {
+  closeFlyout();
+  showProviderSourceError();
+  $('#providerSourceSearch').value = '';
+  $('#providerSourceOverlay').classList.remove('hidden');
+  await Promise.all([
+    providerSourceLoaded ? Promise.resolve(renderProviderSourceList()) : loadProviderSources(),
+    loadOAuthAccounts('anthropic'),
+    loadOAuthAccounts('openai-codex'),
+  ]);
+  requestAnimationFrame(() => $('#providerSourceSearch').focus());
+}
+
+function closeProviderSource() { $('#providerSourceOverlay').classList.add('hidden'); }
+
+$('#providerSourceSearch').addEventListener('input', (e) => renderProviderSourceList(e.target.value));
+$('#providerSourceRefresh').addEventListener('click', () => loadProviderSources(true));
+$('#providerSourceClose').addEventListener('click', closeProviderSource);
+$('#providerSourceCancel').addEventListener('click', closeProviderSource);
+$('#providerSourceOverlay').addEventListener('pointerdown', (e) => { if (e.target === $('#providerSourceOverlay')) closeProviderSource(); });
+$('#providerSourceList').addEventListener('click', async (e) => {
+  const option = e.target.closest('[data-source-id]');
+  if (!option) return;
+  option.disabled = true;
+  showProviderSourceError();
+  try {
+    const result = await api.providerSourceAdd(option.dataset.sourceId);
+    currentSettings = result.settings;
+    renderProviders('chat');
+    closeProviderSource();
+    flashSaved('settings');
+  } catch (error) {
+    option.disabled = false;
+    showProviderSourceError(t('err', { msg: String(error.message || error).slice(0, 200) }));
+  }
+});
+$('#providerSourceOverlay').addEventListener('click', async (e) => {
+  const authorize = e.target.closest('[data-oauth-authorize]');
+  if (authorize) {
+    const provider = authorize.dataset.oauthAuthorize;
+    authorize.disabled = true;
+    authorize.textContent = t('oauth_authorizing');
+    showProviderSourceError();
+    try {
+      const result = await api.oauthAuthorize(provider);
+      if (!result.ok) throw new Error(result.reason || t('oauth_failed'));
+      currentSettings = result.settings;
+      renderProviders('chat');
+      await loadOAuthAccounts(provider);
+      flashSaved('settings');
+    } catch (error) {
+      showProviderSourceError(t('err', { msg: String(error.message || error).slice(0, 220) }));
+    } finally {
+      authorize.disabled = false;
+      authorize.textContent = t('oauth_authorize');
+    }
+  }
+  const remove = e.target.closest('[data-oauth-remove]');
+  if (remove) {
+    if (remove.dataset.confirm !== '1') {
+      remove.dataset.confirm = '1';
+      remove.textContent = t('oauth_disconnect_confirm');
+      return;
+    }
+    remove.disabled = true;
+    const result = await api.oauthRemove(remove.dataset.oauthRemove, remove.dataset.oauthId);
+    if (!result.ok) showProviderSourceError(t('oauth_remove_failed'));
+    await loadOAuthAccounts(remove.dataset.oauthRemove);
+  }
+});
+$('#providerSourceCustom').addEventListener('click', () => {
+  currentSettings.providers.chat.push({ name: '', protocol: 'openai-compatible', baseUrl: '', apiKey: '', model: '' });
+  renderProviders('chat');
+  closeProviderSource();
+  autoSaveNow('settings');
+});
+
 const PROVIDER_TYPES = ['chat', 'embeddings', 'transcription'];
 
 const LOCAL_TASK = { transcription: 'automatic-speech-recognition', embeddings: 'feature-extraction' };
+
+function applyProviderProtocolDefaults(provider) {
+  if (provider.protocol === 'anthropic-messages') {
+    provider.requestPath = '/messages';
+    provider.authHeader = 'x-api-key';
+    provider.authPrefix = '';
+  } else if (provider.protocol === 'openai-responses') {
+    provider.requestPath = '/responses';
+    provider.authHeader = 'Authorization';
+    provider.authPrefix = 'Bearer ';
+  } else {
+    provider.requestPath = '/chat/completions';
+    provider.authHeader = 'Authorization';
+    provider.authPrefix = 'Bearer ';
+  }
+  provider.modelsPath ||= '/models';
+}
+
+let advancedProviderIndex = -1;
+
+function responsePathsVisibility() {
+  $('#compatResponsePaths').classList.toggle('hidden', $('#compatResponseMode').value !== 'manual');
+}
+
+function openProviderAdvanced(index) {
+  const provider = currentSettings.providers.chat[index];
+  if (!provider) return;
+  advancedProviderIndex = index;
+  $('#providerAdvancedTitle').textContent = provider.name || t('compat_advanced');
+  $('#compatApiKeys').value = (provider.apiKeys?.length ? provider.apiKeys : provider.apiKey ? [provider.apiKey] : []).join('\n');
+  $('#compatRequestPath').value = provider.requestPath || (provider.protocol === 'anthropic-messages' ? '/messages' : provider.protocol === 'openai-responses' ? '/responses' : '/chat/completions');
+  $('#compatModelsPath').value = provider.modelsPath || '/models';
+  $('#compatAuthHeader').value = provider.authHeader || (provider.protocol === 'anthropic-messages' ? 'x-api-key' : 'Authorization');
+  $('#compatAuthPrefix').value = provider.authPrefix ?? (provider.protocol === 'anthropic-messages' ? '' : 'Bearer ');
+  $('#compatResponseMode').value = provider.responseMode === 'manual' ? 'manual' : 'auto';
+  $('#compatResponseMode').disabled = false;
+  $('#compatHeaders').value = JSON.stringify(provider.headers || {}, null, 2);
+  $('#compatBody').value = JSON.stringify(provider.body || {}, null, 2);
+  const response = provider.response || {};
+  $('#compatTextPath').value = response.textPath || '';
+  $('#compatToolsPath').value = response.toolCallsPath || '';
+  $('#compatInputPath').value = response.inputTokensPath || '';
+  $('#compatOutputPath').value = response.outputTokensPath || '';
+  $('#compatStopPath').value = response.stopReasonPath || '';
+  $('#compatErrorPath').value = response.errorPath || '';
+  $('#providerAdvancedError').classList.add('hidden');
+  responsePathsVisibility();
+  syncSelectProxy($('#compatResponseMode'));
+  $('#providerAdvancedOverlay').classList.remove('hidden');
+  requestAnimationFrame(() => $('#compatApiKeys').focus());
+}
+
+function closeProviderAdvanced() {
+  advancedProviderIndex = -1;
+  $('#providerAdvancedOverlay').classList.add('hidden');
+}
+
+function jsonObject(value, label) {
+  try {
+    const parsed = value.trim() ? JSON.parse(value) : {};
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error();
+    return parsed;
+  } catch {
+    throw new Error(t('compat_invalid_json', { field: label }));
+  }
+}
+
+$('#compatResponseMode').addEventListener('change', responsePathsVisibility);
+$('#providerAdvancedClose').addEventListener('click', closeProviderAdvanced);
+$('#providerAdvancedCancel').addEventListener('click', closeProviderAdvanced);
+$('#providerAdvancedOverlay').addEventListener('pointerdown', (e) => { if (e.target === $('#providerAdvancedOverlay')) closeProviderAdvanced(); });
+$('#providerAdvancedForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const provider = currentSettings.providers.chat[advancedProviderIndex];
+  if (!provider) return closeProviderAdvanced();
+  try {
+    const apiKeys = $('#compatApiKeys').value.split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
+    provider.apiKeys = apiKeys;
+    provider.apiKey = apiKeys[0] || '';
+    provider.requestPath = $('#compatRequestPath').value.trim();
+    provider.modelsPath = $('#compatModelsPath').value.trim() || '/models';
+    provider.authHeader = $('#compatAuthHeader').value.trim();
+    provider.authPrefix = $('#compatAuthPrefix').value;
+    provider.responseMode = $('#compatResponseMode').value;
+    provider.headers = jsonObject($('#compatHeaders').value, t('compat_headers'));
+    provider.body = jsonObject($('#compatBody').value, t('compat_body'));
+    provider.response = {
+      textPath: $('#compatTextPath').value.trim(),
+      toolCallsPath: $('#compatToolsPath').value.trim(),
+      inputTokensPath: $('#compatInputPath').value.trim(),
+      outputTokensPath: $('#compatOutputPath').value.trim(),
+      stopReasonPath: $('#compatStopPath').value.trim(),
+      errorPath: $('#compatErrorPath').value.trim(),
+    };
+    await autoSaveNow('settings');
+    renderProviders('chat');
+    closeProviderAdvanced();
+  } catch (error) {
+    $('#providerAdvancedError').textContent = error.message;
+    $('#providerAdvancedError').classList.remove('hidden');
+  }
+});
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !$('#providerAdvancedOverlay').classList.contains('hidden')) closeProviderAdvanced();
+  if (e.key === 'Escape' && !$('#providerSourceOverlay').classList.contains('hidden')) closeProviderSource();
+});
 
 // 下载速度统计：进度事件按网络 chunk 高频到达，瞬时速度噪声极大 →
 // 500ms 采样窗口（窗口内沿用上次值，避免数值与文本格式闪动）+ EMA 平滑
@@ -522,7 +966,8 @@ function renderProviders(type) {
   const list = currentSettings.providers[type];
   $(`#providers-${type}`).innerHTML = list
     .map((p, i) => {
-      const locked = p.keyless || p.type === 'local'; // 内置免费/本机 锁定不可编辑（无 tag）
+      const locked = p.keyless || p.type === 'local'; // 免 Key/本机连接锁定关键字段（无 tag）
+      const oauth = Boolean(p.oauthProvider);
       const enableBox = `<label class="check enable-box" title="${t('enabled_label')}"><input type="checkbox" data-p-en="${type}.${i}" ${p.enabled !== false ? 'checked' : ''} /></label>`;
       const xBtn = locked ? '<span class="x-spacer"></span>' : `<button class="x-btn" data-p-rm="${type}.${i}" title="${t('remove')}">✕</button>`;
       if (p.type === 'local') {
@@ -543,16 +988,39 @@ function renderProviders(type) {
         type === 'transcription'
           ? '<span class="x-spacer"></span>'
           : `<button class="mini-btn" data-p-test="${type}.${i}">${t('prov_test')}</button>`;
+      const protocol = p.protocol || 'openai-completions';
+      const protocolSelect = type === 'chat'
+        ? `<select class="provider-protocol" data-p="${type}.${i}.protocol" title="${t('ph_protocol')}" ${locked || oauth ? 'disabled' : ''}>
+            <option value="openai-compatible" ${protocol === 'openai-compatible' ? 'selected' : ''}>${t('proto_openai_compatible')}</option>
+            <option value="openai-completions" ${protocol === 'openai-completions' ? 'selected' : ''}>${t('proto_openai_chat')}</option>
+            <option value="openai-responses" ${protocol === 'openai-responses' ? 'selected' : ''}>${t('proto_openai_responses')}</option>
+            <option value="anthropic-messages" ${protocol === 'anthropic-messages' ? 'selected' : ''}>${t('proto_anthropic')}</option>
+          </select>`
+        : '';
+      const modelField = !locked && type !== 'transcription'
+        ? `<div class="provider-model-field">
+            <input type="text" data-p="${type}.${i}.model" value="${esc(p.model || '')}" placeholder="${t('ph_model')}" />
+            <button type="button" class="model-discover-btn" data-p-models="${type}.${i}" title="${t('models_discover')}" aria-label="${t('models_discover')}">⌄</button>
+          </div>`
+        : `<input type="text" data-p="${type}.${i}.model" value="${esc(p.model || '')}" placeholder="${t('ph_model')}" ${locked ? 'disabled' : ''} />`;
+      const advancedButton = type === 'chat' && !locked
+        ? `<button type="button" class="mini-btn provider-advanced-btn" data-p-advanced="${i}" title="${t('compat_advanced')}" aria-label="${t('compat_advanced')}">⋯</button>`
+        : '';
+      const credentialField = oauth
+        ? `<button type="button" class="mini-btn oauth-manage-btn" data-oauth-manage="${esc(p.oauthProvider)}">${t('oauth_connected')}</button>`
+        : `<input type="password" data-p="${type}.${i}.apiKey" value="${esc(p.apiKey || '')}" placeholder="${esc(p.source?.env?.[0] || (p.keyless ? t('ph_keyless') : t('ph_apikey')))}" ${locked && p.baseUrl?.includes('pollinations') ? 'disabled' : ''} />`;
       return `<div class="provider-row" draggable="true" data-drag="${type}.${i}">
         <span class="drag-handle">⠿</span>
         <input type="text" data-p="${type}.${i}.name" value="${esc(p.name || '')}" placeholder="${t('ph_name')}" ${locked ? 'disabled' : ''} />
-        <input type="text" data-p="${type}.${i}.baseUrl" value="${esc(p.baseUrl || '')}" placeholder="${t('ph_baseurl')}" ${locked ? 'disabled' : ''} />
-        <input type="password" data-p="${type}.${i}.apiKey" value="${esc(p.apiKey || '')}" placeholder="${p.keyless ? t('ph_keyless') : t('ph_apikey')}" ${locked && p.baseUrl?.includes('pollinations') ? 'disabled' : ''} />
-        <input type="text" data-p="${type}.${i}.model" value="${esc(p.model || '')}" placeholder="${t('ph_model')}" ${locked ? 'disabled' : ''} />
-        ${testBtn}${enableBox}${xBtn}
+        ${protocolSelect}
+        <input type="text" data-p="${type}.${i}.baseUrl" value="${esc(p.baseUrl || '')}" placeholder="${t('ph_baseurl')}" ${locked || oauth ? 'disabled' : ''} />
+        ${credentialField}
+        ${modelField}
+        ${advancedButton}${testBtn}${enableBox}${xBtn}
       </div>`;
     })
     .join('');
+  upgradeSelects($(`#providers-${type}`));
   refreshModelStatuses(type);
 }
 
@@ -602,6 +1070,36 @@ document.body.addEventListener('change', (e) => {
 });
 
 document.body.addEventListener('click', async (e) => {
+  const oauthManage = e.target.closest('[data-oauth-manage]');
+  if (oauthManage) await openProviderSource();
+  const advanced = e.target.closest('[data-p-advanced]');
+  if (advanced) openProviderAdvanced(+advanced.dataset.pAdvanced);
+  const discover = e.target.closest('[data-p-models]');
+  if (discover) {
+    const [type, i] = discover.dataset.pModels.split('.');
+    const provider = currentSettings.providers[type][+i];
+    const input = document.querySelector(`[data-p="${type}.${i}.model"]`);
+    discover.disabled = true;
+    discover.textContent = '…';
+    try {
+      const models = await api.listModels(type, { ...provider });
+      if (!models.length) $('#saveHint').textContent = t('models_empty');
+      else openFlyout(discover, models.map((model) => ({
+        label: model,
+        checked: model === input?.value,
+        action: () => {
+          input.value = model;
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+          scheduleAutoSave('settings');
+        },
+      })), { searchable: true, label: t('models_discover') });
+    } catch (error) {
+      $('#saveHint').textContent = t('err', { msg: error.message.slice(0, 200) });
+    }
+    discover.disabled = false;
+    discover.textContent = '⌄';
+  }
   const dl = e.target.closest('[data-model-dl]');
   if (dl) {
     const [type, i] = dl.dataset.modelDl.split('.');
@@ -776,6 +1274,11 @@ document.body.addEventListener('input', (e) => {
   if (bind) {
     const [type, i, key] = bind.dataset.p.split('.');
     currentSettings.providers[type][+i][key] = bind.value.trim();
+    if (key === 'apiKey' && Array.isArray(currentSettings.providers[type][+i].apiKeys)) {
+      const rest = currentSettings.providers[type][+i].apiKeys.slice(1);
+      currentSettings.providers[type][+i].apiKeys = bind.value.trim() ? [bind.value.trim(), ...rest] : rest;
+    }
+    if (key === 'protocol') applyProviderProtocolDefaults(currentSettings.providers[type][+i]);
   }
 });
 document.body.addEventListener('click', (e) => {
@@ -789,6 +1292,10 @@ document.body.addEventListener('click', (e) => {
   const add = e.target.closest('[data-add-provider]');
   if (add) {
     const type = add.dataset.addProvider;
+    if (type === 'chat') {
+      openProviderSource();
+      return;
+    }
     currentSettings.providers[type].push({ name: '', baseUrl: '', apiKey: '', model: '' });
     renderProviders(type);
     autoSaveNow('settings');
@@ -797,6 +1304,7 @@ document.body.addEventListener('click', (e) => {
 
 /* ---------- 设置：表单 ---------- */
 function loadSettingsForm(st) {
+  upgradeSelects();
   PROVIDER_TYPES.forEach(renderProviders);
   $('#rulesInput').value = st.rules || '';
   $('#prefLanguage').value = st.language || 'zh';
@@ -822,6 +1330,7 @@ function loadSettingsForm(st) {
   api.powerStatus().then((p) => {
     $('#powerBadge').textContent = p.onBattery ? t('on_battery') : t('on_ac');
   });
+  syncSelectProxies();
 }
 
 /* ---------- 存储占用（索引 / 日志 / 模型 / 本体）与按类型清理 ---------- */

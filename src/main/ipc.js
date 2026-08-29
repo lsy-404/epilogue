@@ -1,7 +1,7 @@
 'use strict';
 // 所有 IPC handler 注册。重模块（llm/vectorstore/indexer/classifier/stale）handler 内 lazy require ——
 // 托盘静默启动不加载（044 轻量化）。
-const { ipcMain, dialog, shell, app } = require('electron');
+const { ipcMain, dialog, shell, app, clipboard } = require('electron');
 const path = require('path');
 const settings = require('./settings');
 
@@ -186,6 +186,10 @@ function register(getWindow, hooks = {}) {
     const assistant = require('./assistant');
     return assistant.chatTurn(Array.isArray(history) ? history : [], hooks);
   });
+  ipcMain.handle('assistant:approval', (_e, id, approved) => {
+    const assistant = require('./assistant');
+    return assistant.resolveApproval(String(id || ''), approved === true, hooks);
+  });
 
   // 本机模型支持文件：状态 / 手动下载（带进度推送）/ 删除
   ipcMain.handle('model:status', (_e, model) => {
@@ -252,14 +256,64 @@ function register(getWindow, hooks = {}) {
   // provider 连通性测试（渲染层传行内当前值，未保存的 Key 也能测）
   ipcMain.handle('provider:test', (_e, type, provider) => lazy.llm.testProvider(type, provider));
 
-  ipcMain.handle('models:list', async (_e, which) => {
+  // IRIS Provider Source：目录只向渲染层暴露元数据，单击后由主进程校验并创建连接。
+  ipcMain.handle('providers:catalog', async (_e, force = false) => {
+    const result = await require('./providerCatalog').getCatalog(force === true);
+    return {
+      ...result,
+      providers: result.providers.map(({ models, ...provider }) => ({ ...provider, modelCount: models.length })),
+    };
+  });
+  ipcMain.handle('providers:sourceAdd', async (_e, sourceId) => {
+    const catalog = require('./providerCatalog');
+    const source = await catalog.sourceProvider(String(sourceId || ''));
+    if (!source) throw new Error('Provider Source was not found.');
+    const provider = catalog.providerSettingsFromSource(source);
     const cfg = settings.get();
-    const first = (cfg.providers[which] || []).find((p) => lazy.llm.usable(p));
-    if (!first) throw new Error('该类型没有可用 provider');
-    return lazy.llm.listModels(first);
+    const next = [...cfg.providers.chat, provider];
+    const updated = settings.set({ providers: { chat: next } });
+    hooks.onSettingsChanged?.(updated);
+    return { provider, settings: updated };
+  });
+
+  // 官方 OAuth：PKCE 在系统浏览器完成，access/refresh token 只保存于主进程的 safeStorage 密文仓库。
+  ipcMain.handle('oauth:accounts', (_e, provider) => require('./providerOAuth').listAccounts(String(provider || '')));
+  ipcMain.handle('oauth:authorize', async (_e, provider) => {
+    const oauth = require('./providerOAuth');
+    try {
+      const account = await oauth.authorize(String(provider || ''));
+      const preset = oauth.oauthProviderSettings(String(provider || ''));
+      const cfg = settings.get();
+      const chat = [...cfg.providers.chat];
+      const index = chat.findIndex((item) => item.oauthProvider === preset.oauthProvider);
+      if (index >= 0) chat[index] = { ...chat[index], ...preset, enabled: true };
+      else chat.push(preset);
+      const updated = settings.set({ providers: { chat } });
+      hooks.onSettingsChanged?.(updated);
+      return { ok: true, account, settings: updated };
+    } catch (error) {
+      return { ok: false, reason: String(error?.message || error) };
+    }
+  });
+  ipcMain.handle('oauth:remove', (_e, provider, id) => ({
+    ok: require('./providerOAuth').removeAccount(String(provider || ''), String(id || '')),
+  }));
+
+  ipcMain.handle('models:list', async (_e, which, candidate) => {
+    const cfg = settings.get();
+    const provider = candidate && typeof candidate === 'object'
+      ? candidate
+      : (cfg.providers[which] || []).find((p) => lazy.llm.usable(p));
+    if (provider?.source?.registry === 'opencode' && provider.source.provider) {
+      const source = await require('./providerCatalog').sourceProvider(provider.source.provider);
+      if (source) return source.models.map((model) => model.id);
+    }
+    if (!lazy.llm.usable(provider)) throw new Error('该 Provider 尚未配置完成');
+    return lazy.llm.listModels(provider);
   });
 
   ipcMain.handle('shell:reveal', (_e, p) => shell.showItemInFolder(p));
+  ipcMain.handle('clipboard:write', (_e, value) => clipboard.writeText(String(value || '')));
 
   // 关于页：版本信息（047，对齐 ../IRIS 方案）
   ipcMain.handle('app:version', () => ({ version: app.getVersion(), electron: process.versions.electron }));

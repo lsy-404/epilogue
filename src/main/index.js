@@ -7,10 +7,14 @@ const ipc = require('./ipc');
 const scheduler = require('./scheduler');
 const { makeT } = require('../shared/locales');
 
-// ---- 低占用：限制 V8 堆、暴露 gc（托盘 trim 用）、按需禁用硬件加速（须在 ready 前）----
+// ---- 低占用：限制 V8 堆、暴露 gc（托盘 trim 用）----
 app.commandLine.appendSwitch('js-flags', '--max-old-space-size=512 --expose-gc');
 const bootCfg = settings.get();
-if (bootCfg.app.lowPower) app.disableHardwareAcceleration();
+// Fluent/Acrylic surfaces need GPU compositing. The old lowPower path forced
+// Chromium onto D3D11 WARP and made every scroll/overlay repaint in software.
+// Keep an explicit emergency escape hatch for broken GPU drivers instead of
+// coupling renderer acceleration to background-task throttling.
+if (process.env.EPILOGUE_DISABLE_GPU === '1') app.disableHardwareAcceleration();
 
 const ICON = path.join(__dirname, '..', '..', 'build', 'icon.png');
 // 托盘双方案：普通平台用彩色渐变；macOS 用模板图（黑+alpha，深色菜单栏自动渲染为白色）
@@ -45,6 +49,7 @@ function openWindow(view) {
     minWidth: 960,
     minHeight: 640,
     title: 'Epilogue',
+    autoHideMenuBar: true,
     icon: ICON,
     backgroundColor: '#000000',
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
@@ -138,6 +143,9 @@ function createTray() {
 }
 
 app.whenReady().then(() => {
+  // Windows/Linux otherwise inherit Electron's default File/Edit/View menu.
+  // Epilogue uses its own WinUI commands and keeps only the explicit tray menu.
+  if (process.platform !== 'darwin') Menu.setApplicationMenu(null);
   // 默认低优先级，尽量不抢前台资源
   if (bootCfg.app.lowPower) {
     try {

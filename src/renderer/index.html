@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;" />
   <title>Epilogue</title>
+  <link rel="stylesheet" href="vendor/winui/theme.css" />
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -151,6 +152,23 @@
         <h1>ASSISTANT<span class="zh" data-i18n="nav_assistant"></span></h1>
         <p class="view-desc" data-i18n="desc_assistant"></p>
       </header>
+      <div class="agent-runtime-banner">
+        <div class="agent-stage-flow" aria-label="Agent workflow">
+          <span class="agent-stage"><i>1</i><b data-i18n="agent_observe"></b></span>
+          <span class="agent-stage-line"></span>
+          <span class="agent-stage"><i>2</i><b data-i18n="agent_plan"></b></span>
+          <span class="agent-stage-line"></span>
+          <span class="agent-stage"><i>3</i><b data-i18n="agent_act"></b></span>
+          <span class="agent-stage-line"></span>
+          <span class="agent-stage"><i>4</i><b data-i18n="agent_verify"></b></span>
+        </div>
+        <div class="agent-guardrail"><span class="guardrail-dot"></span><span data-i18n="agent_guardrail"></span></div>
+      </div>
+      <div class="quick-prompts" aria-label="Suggestions">
+        <button class="quick-prompt" type="button" data-quick-prompt data-i18n="quick_find"></button>
+        <button class="quick-prompt" type="button" data-quick-prompt data-i18n="quick_status"></button>
+        <button class="quick-prompt" type="button" data-quick-prompt data-i18n="quick_habit"></button>
+      </div>
       <div class="panel chat-panel">
         <div class="panel-head"><h2 data-i18n="chat_title"></h2><button class="btn ghost" id="btnChatClear" data-i18n="chat_clear"></button></div>
         <div class="chat-log" id="chatLog"></div>
@@ -286,6 +304,80 @@
       </div>
     </section>
   </main>
+
+  <!-- WinUI flyouts: protocol/language/model pickers and context menus share one portal. -->
+  <div class="flyout-layer" id="flyoutLayer"></div>
+
+  <!-- IRIS Provider Source picker + official OAuth accounts -->
+  <div class="dialog-overlay hidden" id="providerSourceOverlay">
+    <section class="settings-dialog provider-source-dialog" role="dialog" aria-modal="true" aria-labelledby="providerSourceTitle">
+      <header class="dialog-head">
+        <div><span class="eyebrow">PROVIDER SOURCE</span><h2 id="providerSourceTitle" data-i18n="source_title"></h2></div>
+        <button type="button" class="x-btn" id="providerSourceClose" aria-label="Close">✕</button>
+      </header>
+
+      <div class="oauth-source-grid">
+        <article class="oauth-source-card">
+          <div><strong data-i18n="oauth_claude"></strong><small data-i18n="oauth_claude_hint"></small></div>
+          <button type="button" class="btn primary" data-oauth-authorize="anthropic" data-i18n="oauth_authorize"></button>
+          <div class="oauth-account-list" data-oauth-accounts="anthropic"></div>
+        </article>
+        <article class="oauth-source-card">
+          <div><strong data-i18n="oauth_codex"></strong><small data-i18n="oauth_codex_hint"></small></div>
+          <button type="button" class="btn primary" data-oauth-authorize="openai-codex" data-i18n="oauth_authorize"></button>
+          <div class="oauth-account-list" data-oauth-accounts="openai-codex"></div>
+        </article>
+      </div>
+
+      <div class="source-catalog-head">
+        <div><strong data-i18n="source_catalog"></strong><small data-i18n="source_catalog_hint"></small></div>
+        <button type="button" class="mini-btn" id="providerSourceRefresh" data-i18n="source_refresh"></button>
+      </div>
+      <input type="search" class="source-search" id="providerSourceSearch" data-i18n-ph="source_search" />
+      <div class="provider-source-list" id="providerSourceList"></div>
+      <p class="form-error hidden" id="providerSourceError"></p>
+      <footer class="dialog-actions source-actions">
+        <button type="button" class="btn ghost" id="providerSourceCustom" data-i18n="source_custom"></button>
+        <button type="button" class="btn" id="providerSourceCancel" data-i18n="chat_reject"></button>
+      </footer>
+    </section>
+  </div>
+
+  <!-- Provider compatible API advanced editor -->
+  <div class="dialog-overlay hidden" id="providerAdvancedOverlay">
+    <form class="settings-dialog" id="providerAdvancedForm">
+      <header class="dialog-head">
+        <div><span class="eyebrow">COMPATIBLE API</span><h2 id="providerAdvancedTitle"></h2></div>
+        <button type="button" class="x-btn" id="providerAdvancedClose" aria-label="Close">✕</button>
+      </header>
+      <div class="form-grid advanced-provider-grid">
+        <label class="wide"><span data-i18n="compat_keys"></span><textarea id="compatApiKeys" rows="3" data-i18n-ph="compat_keys_ph"></textarea></label>
+        <label><span data-i18n="compat_request_path"></span><input id="compatRequestPath" class="mono" /></label>
+        <label><span data-i18n="compat_models_path"></span><input id="compatModelsPath" class="mono" /></label>
+        <label><span data-i18n="compat_auth_header"></span><input id="compatAuthHeader" class="mono" /></label>
+        <label><span data-i18n="compat_auth_prefix"></span><input id="compatAuthPrefix" class="mono" /></label>
+        <label><span data-i18n="compat_response_mode"></span><select id="compatResponseMode"><option value="auto" data-i18n="compat_response_auto"></option><option value="manual" data-i18n="compat_response_manual"></option></select></label>
+        <label class="wide"><span data-i18n="compat_headers"></span><textarea id="compatHeaders" rows="3" class="mono" placeholder="{}"></textarea></label>
+        <label class="wide"><span data-i18n="compat_body"></span><textarea id="compatBody" rows="3" class="mono" placeholder="{}"></textarea></label>
+      </div>
+      <fieldset id="compatResponsePaths" class="response-paths hidden">
+        <legend data-i18n="compat_response_paths"></legend>
+        <div class="form-grid">
+          <label><span data-i18n="compat_text_path"></span><input id="compatTextPath" class="mono" /></label>
+          <label><span data-i18n="compat_tools_path"></span><input id="compatToolsPath" class="mono" /></label>
+          <label><span data-i18n="compat_input_path"></span><input id="compatInputPath" class="mono" /></label>
+          <label><span data-i18n="compat_output_path"></span><input id="compatOutputPath" class="mono" /></label>
+          <label><span data-i18n="compat_stop_path"></span><input id="compatStopPath" class="mono" /></label>
+          <label><span data-i18n="compat_error_path"></span><input id="compatErrorPath" class="mono" /></label>
+        </div>
+      </fieldset>
+      <p class="form-error hidden" id="providerAdvancedError"></p>
+      <footer class="dialog-actions">
+        <button type="button" class="btn ghost" id="providerAdvancedCancel" data-i18n="chat_reject"></button>
+        <button type="submit" class="btn primary" data-i18n="compat_save"></button>
+      </footer>
+    </form>
+  </div>
 
   <!-- 首次启动 ToS -->
   <div class="tos-overlay hidden" id="tosOverlay">

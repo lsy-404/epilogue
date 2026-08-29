@@ -1,21 +1,14 @@
 'use strict';
-// 配置存储：userData/settings.json（v2：provider 数组灾备 + cleanup 多文件夹 + 应用偏好）
+// 配置存储：userData/settings.json（v4：Provider Source / OAuth；不再预装免费 chat 源）
 const { app } = require('electron');
 const fs = require('fs');
 const path = require('path');
 
-// 内置免费 provider：Pollinations 免 Key 可直接用；OpenRouter / OpenCode Zen 填 Key 后启用（免费额度，注册取 Key）
-const BUILTIN_CHAT = [
-  { name: 'Pollinations 内置免费', baseUrl: 'https://text.pollinations.ai/openai', apiKey: '', model: 'openai', keyless: true },
-  { name: 'OpenRouter Free', baseUrl: 'https://openrouter.ai/api/v1', apiKey: '', model: 'meta-llama/llama-3.3-70b-instruct:free' },
-  { name: 'OpenCode Zen Free', baseUrl: 'https://opencode.ai/zen/v1', apiKey: '', model: 'deepseek-v4-flash-free' },
-];
-
 const DEFAULTS = {
-  version: 2,
+  version: 4,
   // 每类按数组顺序灾备：前一个失败自动尝试下一个
   providers: {
-    chat: BUILTIN_CHAT,
+    chat: [],
     // 默认本机 BGE 中文 embedding（免费、离线、大陆可用——经 hf-mirror 下载）；可追加云端 API 作灾备
     embeddings: [
       { name: '本机 BGE 中文', type: 'local', model: 'Xenova/bge-small-zh-v1.5', keyless: true },
@@ -48,7 +41,7 @@ const DEFAULTS = {
   app: {
     launchAtLogin: false,
     trayKeepAlive: true, // 关闭窗口驻留托盘而非退出
-    lowPower: true, // 低占用：禁硬件加速、低进程优先级、电池模式降速并跳过转写
+    lowPower: true, // 低占用：低进程优先级；保留 UI 的 GPU 合成，电池模式降速并跳过转写
     hfMirror: 'https://hf-mirror.com', // 本机模型下载镜像（大陆可用），置空走 huggingface.co
     avoidCloudOnMetered: true, // 按流量计费网络时避免使用云 embedding（whisper 本就仅本机）
   },
@@ -91,6 +84,23 @@ function deepMerge(base, extra) {
   return out;
 }
 
+function hasProviderCredential(provider) {
+  return Boolean(
+    String(provider?.apiKey || '').trim() ||
+    (Array.isArray(provider?.apiKeys) && provider.apiKeys.some((key) => String(key || '').trim())) ||
+    provider?.authType === 'oauth'
+  );
+}
+
+function isUnconfiguredLegacyFreeProvider(provider) {
+  if (hasProviderCredential(provider)) return false;
+  const baseUrl = String(provider?.baseUrl || '').toLowerCase();
+  const name = String(provider?.name || '').toLowerCase();
+  if (baseUrl.includes('text.pollinations.ai') && provider?.keyless === true) return true;
+  if (baseUrl.includes('openrouter.ai') && name === 'openrouter free') return true;
+  return baseUrl.includes('opencode.ai/zen') && name === 'opencode zen free';
+}
+
 // v1（单 provider 对象）→ v2（数组）。无 Key 的旧条目直接丢弃，让内置默认值生效。
 function migrate(parsed) {
   if (parsed.providers) {
@@ -122,12 +132,21 @@ function migrate(parsed) {
     if (Array.isArray(em) && !em.some((p) => p.type === 'local')) {
       em.unshift({ name: '本机 BGE 中文', type: 'local', model: 'Xenova/bge-small-zh-v1.5', keyless: true });
     }
-    // v2.6：OpenCode Zen 免费预设（deepseek-v4-flash-free）—— 缺则追加到尾部，不动用户既有灾备顺序
-    const ch = parsed.providers.chat;
-    if (Array.isArray(ch) && !ch.some((p) => (p.baseUrl || '').includes('opencode.ai'))) {
-      ch.push({ name: 'OpenCode Zen Free', baseUrl: 'https://opencode.ai/zen/v1', apiKey: '', model: 'deepseek-v4-flash-free' });
+    // v4：移除未配置凭据的旧内置免费源；同服务的用户自建/已填 Key 连接保留。
+    let ch = parsed.providers.chat;
+    if (Array.isArray(ch)) {
+      ch = ch.filter((provider) => !isUnconfiguredLegacyFreeProvider(provider));
+      parsed.providers.chat = ch;
+    }
+    // v3：IRIS 风格多协议模型接入器。旧 chat provider 保持 OpenAI Chat Completions 语义。
+    if (Array.isArray(ch)) {
+      const allowed = new Set(['openai-compatible', 'openai-completions', 'openai-responses', 'anthropic-messages']);
+      for (const provider of ch) {
+        if (!allowed.has(provider.protocol)) provider.protocol = 'openai-completions';
+      }
     }
   }
+  parsed.version = 4;
   // v2.8：图形 embedding 默认升级为中文优化 Chinese-CLIP —— 仅当用户从未启用且仍为旧默认（未投入）时升级
   if (parsed.imageEmbed && parsed.imageEmbed.enabled !== true && parsed.imageEmbed.model === 'Xenova/clip-vit-base-patch32') {
     parsed.imageEmbed.model = 'Xenova/chinese-clip-vit-base-patch16';
@@ -174,4 +193,4 @@ function seedCleanupFolders() {
   return set({ cleanup: { folders, seeded: true } });
 }
 
-module.exports = { get, set, DEFAULTS, deepMerge, migrate, seedCleanupFolders };
+module.exports = { get, set, DEFAULTS, deepMerge, migrate, seedCleanupFolders, isUnconfiguredLegacyFreeProvider };

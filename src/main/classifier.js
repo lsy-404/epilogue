@@ -5,7 +5,7 @@ const path = require('path');
 const llm = require('./llm');
 const settings = require('./settings');
 
-const BATCH_SIZE = 8; // 每次 LLM 请求最多归类的文件数（小批 prompt 小、免费通道响应快）
+const BATCH_SIZE = 8; // 每次 LLM 请求最多归类的文件数（小批 prompt 更短，失败重试成本更低）
 const BATCH_HARD = 24; // 单批硬上限：成套内容整组同批可超 BATCH_SIZE，但不超过此值（防 prompt 爆炸）
 const EXPLORE_ROUNDS = 2; // 智能体目录探索轮数上限（之后强制产出结果）
 

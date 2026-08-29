@@ -1,6 +1,9 @@
 'use strict';
 // Linux deb：node scripts/installer-linux.js <arch(x64|arm64)> <tag>
-const installer = require('electron-installer-debian');
+// electron-installer-debian 4 is ESM; Node 22 exposes its default export through require().
+// Keep the fallback so older CommonJS releases remain usable in local packaging.
+const installerModule = require('electron-installer-debian');
+const installer = installerModule.default || installerModule;
 const fs = require('fs');
 const path = require('path');
 

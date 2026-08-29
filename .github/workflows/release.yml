@@ -91,7 +91,7 @@ jobs:
       - name: Installer (Linux deb)
         if: matrix.platform == 'linux'
         run: |
-          npm i --no-save electron-installer-debian
+          npm i --no-save electron-installer-debian@4.0.0
           node scripts/installer-linux.js ${{ matrix.arch }} ${{ github.ref_name }}
 
       - name: Upload to Release

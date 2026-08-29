@@ -14,7 +14,7 @@
 
 - **清理**：定期扫描长期未动的过期文件，AI 按你的自然语言习惯给出归位建议，逐项确认后移动；理解成套内容（课件系列、便携软件、剧集）并整体归档，能利用目标文件夹的多层结构。
 - **寻物**：「上学期的实验报告放哪了？」一句话找回文件——关键字 / 相似度 / AI 问答三种模式，支持用文字描述找图片、理解「去年」「上周」等相对时间。
-- **助手**：内置对话智能体——改设置、把「以后发票都放 财务/」记成习惯、查文件。
+- **助手**：内置对话智能体——以“观察 → 规划 → 执行 → 验证”闭环查文件、读取状态和调整配置；读取操作可自动执行，任何设置写入都会先展示变更并等待确认。
 - **可选自动化**（默认关闭，仅可手动开启）：Solo 模式定时自动归类免审批；允许 AI 将无价值临时文件移入系统回收站。
 
 ## AI 能力与多 Provider 灾备
@@ -23,12 +23,18 @@
 
 | 能力 | 内置预设 | 说明 |
 | --- | --- | --- |
-| Chat / 对话模型 | Pollinations（免 Key）→ OpenRouter Free → OpenCode Zen Free | 注册填 Key 即激活后两者；可加任意 OpenAI-compatible 服务 |
+| Chat / 对话模型 | 无预装云端源 | “添加”可从 models.dev / OpenCode Provider Source 目录选择，也可连接 Claude 与 ChatGPT Codex 官方 OAuth |
 | Embeddings / 文本向量 | **本机 BGE 中文**（离线） | 可追加云端 API 灾备 |
 | Image Embedding / 图形向量 | **本机 CLIP 系四方案可选**（默认中文优化，按需下载） | 用「红色的海报」这类描述找图 |
 | Whisper / 转写 | **本机两档**（低 / 高精度，独立下载启用） | 可加云端转写灾备 |
 
 支持识别压缩包、Office、PDF、纯文本、图片与音视频。
+
+自定义 Chat Provider 可在设置中选择协议。Base URL 应指向对应 API 根路径（通常以 `/v1` 结尾）；模型列表发现、原生工具调用、用量解析与错误隔离均由协议适配层统一处理。Provider 自定义请求体不能覆盖消息、工具、模型等受控字段。
+
+界面使用来自 [Furry-Xiyi/WinUIonWeb](https://github.com/Furry-Xiyi/WinUIonWeb) 的 WinUI 设计令牌，并在 Electron 产品层加入 GPU 合成的 Acrylic、响应式布局、统一 flyout 弹出菜单、Agent 阶段指示与写操作审批卡片。第三方归属见 `src/renderer/vendor/winui/NOTICE.md`。
+
+Provider Source 会自动带入上游地址、协议、模型目录和 API Key 环境变量提示；OAuth 使用系统浏览器 PKCE 授权，access/refresh token 只存入 Electron `safeStorage` 加密仓库，不进入设置 JSON 或渲染进程。自定义 Compatible 接入器仍支持 API Key 组轮换、自定义鉴权 Header、请求/模型路径、Headers、请求体覆盖与手动响应字段映射。
 
 ## 轻量驻留
 
@@ -42,6 +48,8 @@ npm start      # 启动应用
 npm test       # 单元测试
 bash scripts/pack.sh [platform] [arch]   # 本地打包
 ```
+
+测试覆盖三类 Chat 协议的请求/响应转换、模型发现、安全请求体合并，以及 Agent 工具白名单与设置写入边界。
 
 推送 `v*` 标签即由 CI 自动构建全平台双架构发布包。
 

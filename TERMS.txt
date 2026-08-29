@@ -38,12 +38,9 @@ EPILOGUE 服务条款 / TERMS OF SERVICE
 第四条  第三方 AI 服务
 
 4.1 当你使用摘要、归类、问答、助手对话等 AI 功能时，相关文件的元数据与
-    内容片段会被发送至你所配置（或内置默认）的第三方 AI 服务商；该等
+    内容片段会被发送至你所配置或授权连接的第三方 AI 服务商；该等
     传输与处理受各服务商自己的服务条款与隐私政策约束，与开发者无关。
-4.2 内置免费通道（如 Pollinations、OpenRouter、OpenCode Zen 等）由第三方
-    独立运营，开发者不对其可用性、稳定性、数据处理方式或输出内容作任何
-    担保。
-4.3 请勿对高度敏感、涉密或受法律特殊保护的文件使用 AI 功能，除非你确认
+4.2 请勿对高度敏感、涉密或受法律特殊保护的文件使用 AI 功能，除非你确认
     所配置的服务商满足你的合规要求。
 
 第五条  文件操作与风险
@@ -125,13 +122,10 @@ Section 4  Third-Party AI Services
 
 4.1 When you use AI features (summaries, filing, recall, assistant chat),
     file metadata and content excerpts are sent to the third-party AI
-    providers you configure (or the built-in defaults); such transfers and
+    providers you configure or authorize; such transfers and
     processing are governed by those providers' own terms and privacy
     policies, independent of the Developer.
-4.2 Built-in free channels (e.g. Pollinations, OpenRouter, OpenCode Zen)
-    are operated independently by third parties; the Developer makes no
-    warranty as to their availability, stability, data handling, or output.
-4.3 Do not use AI features on highly sensitive, confidential, or legally
+4.2 Do not use AI features on highly sensitive, confidential, or legally
     protected files unless you have verified that your configured provider
     meets your compliance requirements.
 
