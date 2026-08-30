@@ -25,6 +25,8 @@ const LOCALES = {
     th_file: '文件', th_idle: '闲置', th_size: '大小', th_in: '所在',
     suggest_title: '归放建议', apply_moves: '执行选中的移动', th_dest: '建议位置', th_reason: '理由',
     no_dest: '不移动（无把握或不符合习惯）', result_title: '移动结果',
+    undo_moves: '撤销本次移动', undoing: '正在撤销…', undo_available: '可撤销最近 {n} 个文件的移动',
+    undo_done: '已恢复原位置', undo_partial: '部分文件未能恢复', result_restored: '已撤销至原位置',
     scanning: '扫描中…', found_n: '发现 {n} 个过期文件', auto_found_n: '定期扫描发现 {n} 个过期文件',
     none_found: '没有发现过期文件，干净！', analyzing: '分析文件内容…', suggest_done: '已生成 {n} 条建议',
     // 寻物
@@ -155,6 +157,8 @@ const LOCALES = {
     th_file: 'File', th_idle: 'Idle', th_size: 'Size', th_in: 'In',
     suggest_title: 'Suggestions', apply_moves: 'Apply selected moves', th_dest: 'Destination', th_reason: 'Reason',
     no_dest: 'Keep (unsure or no rule match)', result_title: 'Result',
+    undo_moves: 'Undo this move', undoing: 'Undoing…', undo_available: 'The latest {n} file move(s) can be undone',
+    undo_done: 'Restored to the original location', undo_partial: 'Some files could not be restored', result_restored: 'Restored to original location',
     scanning: 'Scanning…', found_n: 'Found {n} stale file(s)', auto_found_n: 'Scheduled scan found {n} stale file(s)',
     none_found: 'No stale files. Clean!', analyzing: 'Analyzing file contents…', suggest_done: '{n} suggestion(s) ready',
     desc_recall: '“Where did I put last term’s lab report?” — recall any file in one sentence; index folders below to widen coverage.',

@@ -12,7 +12,7 @@ Open source (**ALE 1.1 & GPL-3.0**) with **zero data collection** — settings, 
 
 ## Features
 
-- **Cleanup**: periodically scans for files left untouched for too long; AI suggests where each one belongs based on your filing habits written in plain language, and moves them after your item-by-item confirmation. It recognizes sets (lecture series, portable apps, episodes) and files them as a whole, making use of nested destination folder structures.
+- **Cleanup**: periodically scans for files left untouched for too long; AI suggests where each one belongs based on your filing habits written in plain language, and moves them after your item-by-item confirmation. It recognizes sets (lecture series, portable apps, episodes) and files them as a whole, making use of nested destination folder structures. Successful moves are recorded in a local transaction journal and can be undone across restarts.
 - **Recall**: "Where did I put last term's lab report?" — find any file in one sentence, via keyword / similarity / AI Q&A modes; find images by text description; understands relative time like "last year" or "last week".
 - **Assistant**: a built-in conversational agent with an Observe → Plan → Act → Verify loop for file lookup, status inspection, and configuration. Read operations can run automatically; every settings write is previewed and requires explicit approval.
 - **Optional automation** (off by default, can only be enabled manually): Solo mode auto-files on schedule without per-item approval; optionally let the AI move clearly worthless temp files to the system Trash.
@@ -49,7 +49,7 @@ npm test       # unit tests
 bash scripts/pack.sh [platform] [arch]   # local packaging
 ```
 
-Tests cover request/response conversion for all three Chat protocols, model discovery, safe body merging, plus the agent tool allowlist and settings-write boundary.
+Tests cover all three Chat protocol adapters, model discovery, safe body merging, agent boundaries, reversible file moves, and streaming vector storage.
 
 Pushing a `v*` tag triggers CI for every supported release target. macOS Intel is temporarily excluded because the current local-model runtime no longer ships Darwin x64 binaries; this avoids publishing an installable package with broken local models.
 

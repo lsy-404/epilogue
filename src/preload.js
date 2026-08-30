@@ -41,6 +41,8 @@ contextBridge.exposeInMainWorld('epologue', {
   },
   classifySuggest: (paths) => ipcRenderer.invoke('classify:suggest', paths),
   classifyApply: (moves) => ipcRenderer.invoke('classify:apply', moves),
+  classifyUndoLatest: (transactionId) => ipcRenderer.invoke('classify:undoLatest', transactionId),
+  classifyUndoStatus: () => ipcRenderer.invoke('classify:undoStatus'),
   listModels: (which, provider) => ipcRenderer.invoke('models:list', which, provider),
   providerTest: (type, provider) => ipcRenderer.invoke('provider:test', type, provider),
   providerCatalog: (force = false) => ipcRenderer.invoke('providers:catalog', force),

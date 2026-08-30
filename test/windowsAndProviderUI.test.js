@@ -24,3 +24,15 @@ test('chat Add opens the Provider Source picker with OAuth actions', () => {
   assert.match(renderer, /api\.providerSourceAdd/);
   assert.match(preload, /oauthAuthorize/);
 });
+
+test('file moves expose a persisted undo action through the trusted preload bridge', () => {
+  const html = read('src/renderer/index.html');
+  const renderer = read('src/renderer/app.js');
+  const preload = read('src/preload.js');
+  const ipc = read('src/main/ipc.js');
+  assert.match(html, /id="btnUndoMoves"/);
+  assert.match(renderer, /classifyUndoLatest/);
+  assert.match(renderer, /restoreUndoStatus/);
+  assert.match(preload, /classifyUndoLatest/);
+  assert.match(ipc, /classify:undoLatest/);
+});

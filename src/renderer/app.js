@@ -687,10 +687,48 @@ $('#btnApplyMoves').addEventListener('click', async () => {
           : `<li><span class="ok">✓</span><div class="item-main"><div class="item-title">${esc(basename(r.newPath))}</div><div class="item-sub">${esc(r.newPath)}</div></div><button class="link-btn" data-reveal="${esc(r.newPath)}">${t('locate')}</button></li>`
     )
     .join('');
+  const transaction = results.find((result) => result.undoable && result.transactionId);
+  $('#btnUndoMoves').classList.toggle('hidden', !transaction);
+  $('#btnUndoMoves').dataset.transactionId = transaction?.transactionId || '';
   $('#moveResultPanel').classList.remove('hidden');
   $('#suggestPanel').classList.add('hidden');
   refreshDashboard();
 });
+
+$('#btnUndoMoves').addEventListener('click', async () => {
+  const button = $('#btnUndoMoves');
+  const transactionId = button.dataset.transactionId;
+  if (!transactionId || button.disabled) return;
+  button.disabled = true;
+  button.textContent = t('undoing');
+  try {
+    const outcome = await api.classifyUndoLatest(transactionId);
+    $('#moveResultList').innerHTML = outcome.results
+      .map((result) =>
+        result.error
+          ? `<li><span class="err">✗</span><div class="item-main"><div class="item-title">${esc(basename(result.restoredPath))}</div><div class="item-sub err">${esc(result.error)}</div></div></li>`
+          : `<li><span class="ok">↶</span><div class="item-main"><div class="item-title">${esc(basename(result.restoredPath))}</div><div class="item-sub">${esc(result.restoredPath)} · ${t('result_restored')}</div></div><button class="link-btn" data-reveal="${esc(result.restoredPath)}">${t('locate')}</button></li>`
+      )
+      .join('');
+    $('#organizeHint').textContent = t(outcome.complete ? 'undo_done' : 'undo_partial');
+    button.classList.toggle('hidden', outcome.complete);
+    await Promise.all([refreshDashboard(), refreshLibrary()]);
+  } catch (error) {
+    $('#organizeHint').textContent = t('err', { msg: error.message });
+  } finally {
+    button.disabled = false;
+    button.textContent = t('undo_moves');
+  }
+});
+
+async function restoreUndoStatus() {
+  const transaction = await api.classifyUndoStatus();
+  if (!transaction) return;
+  $('#moveResultList').innerHTML = `<li><span class="badge">↶</span><div class="item-main"><div class="item-title">${t('undo_available', { n: transaction.count })}</div><div class="item-sub">${esc(new Date(transaction.createdAt).toLocaleString())}</div></div></li>`;
+  $('#btnUndoMoves').dataset.transactionId = transaction.id;
+  $('#btnUndoMoves').classList.remove('hidden');
+  $('#moveResultPanel').classList.remove('hidden');
+}
 
 /* ---------- 设置：选项卡 ---------- */
 for (const btn of document.querySelectorAll('.tab-btn')) {
@@ -1570,4 +1608,5 @@ $('#tosClose').addEventListener('click', () => {
   if (!currentSettings.recordedFolders.length) currentSettings.recordedFolders = await api.detectFolders();
   await refreshDashboard();
   await refreshLibrary();
+  await restoreUndoStatus();
 })();

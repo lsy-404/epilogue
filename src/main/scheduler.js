@@ -63,7 +63,7 @@ async function soloProcess(found) {
     .filter((s) => s.trash === true || (s.move !== false && s.destination))
     .map((s) => ({ filePath: s.filePath, destination: s.destination, subfolder: s.subfolder || '', trash: s.trash === true }));
   if (!moves.length) return 0;
-  const results = await classifier.applyMoves(moves, store);
+  const results = await classifier.applyMoves(moves, store, { source: 'solo' });
   const ok = results.filter((r) => r.newPath || r.trashed).length;
   log('solo', `auto-filed ${ok}/${moves.length}`, { trashed: results.filter((r) => r.trashed).length });
   return ok;

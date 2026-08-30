@@ -260,6 +260,10 @@ function register(getWindow, hooks = {}) {
     return [...out, ...failed];
   });
   handle('classify:apply', (_e, moves) => lazy.classifier.applyMoves(moves, getStore()));
+  handle('classify:undoLatest', (_e, transactionId) =>
+    lazy.classifier.undoMoves(transactionId, getStore())
+  );
+  handle('classify:undoStatus', () => lazy.classifier.latestUndoable());
 
   // provider 连通性测试（渲染层传行内当前值，未保存的 Key 也能测）
   handle('provider:test', (_e, type, provider) => lazy.llm.testProvider(type, provider));

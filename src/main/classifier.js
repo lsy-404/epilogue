@@ -5,6 +5,16 @@ const path = require('path');
 const llm = require('./llm');
 const settings = require('./settings');
 
+let operationJournal;
+function getOperationJournal() {
+  if (!operationJournal) {
+    const { app } = require('electron');
+    const { OperationJournal } = require('./operationJournal');
+    operationJournal = new OperationJournal(path.join(app.getPath('userData'), 'operations.json'));
+  }
+  return operationJournal;
+}
+
 const BATCH_SIZE = 8; // 每次 LLM 请求最多归类的文件数（小批 prompt 更短，失败重试成本更低）
 const BATCH_HARD = 24; // 单批硬上限：成套内容整组同批可超 BATCH_SIZE，但不超过此值（防 prompt 爆炸）
 const EXPLORE_ROUNDS = 2; // 智能体目录探索轮数上限（之后强制产出结果）
@@ -224,22 +234,41 @@ function uniqueDest(dir, fileName) {
 }
 
 // moves: [{filePath, destination, subfolder, trash?}] → 实际移动/移入回收站，返回 [{filePath, newPath?, trashed?, error?}]
-async function applyMoves(moves, store) {
+async function applyMoves(moves, store, options = {}) {
   const { log } = require('./log');
   const results = [];
+  const journal = options.journal || getOperationJournal();
+  // The transaction itself is persisted before any filesystem mutation.
+  // Each operation is then staged with its exact destination and checkpointed
+  // after success, leaving enough information to recover from a mid-batch stop.
+  const transaction = moves.length ? journal.begin(options.source || 'manual') : null;
   for (const m of moves) {
     try {
       if (m.trash === true) {
+        const operation = journal.stage(transaction.id, { kind: 'trash', from: m.filePath });
         const { shell } = require('electron');
         await shell.trashItem(m.filePath); // 系统回收站/废纸篓，可随时找回
-        store.remove(m.filePath);
+        try {
+          journal.markApplied(transaction.id, operation.id);
+        } catch (error) {
+          // The staged audit entry is already durable, and the system trash
+          // remains the recovery mechanism. Do not report the completed trash
+          // action itself as failed solely because its checkpoint failed.
+          log('classify', 'trash journal checkpoint failed', { error: String(error.message || error).slice(0, 160) });
+        }
+        try {
+          store.remove(m.filePath);
+        } catch (error) {
+          log('classify', 'trash index update failed', { error: String(error.message || error).slice(0, 160) });
+        }
         log('classify', `trashed: ${path.basename(m.filePath)}`);
-        results.push({ filePath: m.filePath, trashed: true });
+        results.push({ filePath: m.filePath, trashed: true, transactionId: transaction.id, undoable: false });
         continue;
       }
       const destDir = m.subfolder ? path.join(m.destination, m.subfolder) : m.destination;
       fs.mkdirSync(destDir, { recursive: true });
       const newPath = uniqueDest(destDir, path.basename(m.filePath));
+      const operation = journal.stage(transaction.id, { kind: 'move', from: m.filePath, to: newPath });
       try {
         fs.renameSync(m.filePath, newPath);
       } catch (e) {
@@ -251,16 +280,58 @@ async function applyMoves(moves, store) {
           throw e;
         }
       }
-      store.updatePath(m.filePath, newPath);
-      results.push({ filePath: m.filePath, newPath });
+      try {
+        journal.markApplied(transaction.id, operation.id);
+      } catch (error) {
+        log('classify', 'move journal checkpoint failed', { error: String(error.message || error).slice(0, 160) });
+      }
+      try {
+        store.updatePath(m.filePath, newPath);
+      } catch (error) {
+        log('classify', 'move index update failed', { error: String(error.message || error).slice(0, 160) });
+      }
+      results.push({ filePath: m.filePath, newPath, transactionId: transaction.id, undoable: true });
     } catch (e) {
       results.push({ filePath: m.filePath, error: e.message });
     }
   }
   // 归档计数（总览统计「已归档文件」）
   const ok = results.filter((r) => r.newPath).length;
-  if (ok) settings.set({ stats: { archivedCount: (settings.get().stats.archivedCount || 0) + ok } });
+  if (ok) {
+    try {
+      settings.set({ stats: { archivedCount: (settings.get().stats.archivedCount || 0) + ok } });
+    } catch (error) {
+      log('classify', 'archive statistics update failed', { error: String(error.message || error).slice(0, 160) });
+    }
+  }
   return results;
 }
 
-module.exports = { suggest, applyMoves, detectSets, listDirSafe, destTree };
+function latestUndoable(options = {}) {
+  return (options.journal || getOperationJournal()).latestUndoable();
+}
+
+function undoMoves(transactionId, store, options = {}) {
+  const { log } = require('./log');
+  const outcome = (options.journal || getOperationJournal()).undo(String(transactionId || ''), store);
+  const restored = outcome.results.filter((result) => !result.error).length;
+  if (restored) {
+    try {
+      settings.set({
+        stats: {
+          archivedCount: Math.max(0, (settings.get().stats.archivedCount || 0) - restored),
+        },
+      });
+    } catch (error) {
+      log('classify', 'archive statistics rollback failed', { error: String(error.message || error).slice(0, 160) });
+    }
+  }
+  log('classify', `undo ${outcome.complete ? 'complete' : 'partial'}`, {
+    transactionId: outcome.transactionId,
+    restored,
+    failed: outcome.results.length - restored,
+  });
+  return outcome;
+}
+
+module.exports = { suggest, applyMoves, undoMoves, latestUndoable, detectSets, listDirSafe, destTree };
