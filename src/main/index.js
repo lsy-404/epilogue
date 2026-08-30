@@ -6,6 +6,7 @@ const settings = require('./settings');
 const ipc = require('./ipc');
 const scheduler = require('./scheduler');
 const { makeT } = require('../shared/locales');
+const { isTrustedRendererNavigation } = require('./runtimeSecurity');
 
 // ---- 低占用：限制 V8 堆、暴露 gc（托盘 trim 用）----
 app.commandLine.appendSwitch('js-flags', '--max-old-space-size=512 --expose-gc');
@@ -57,10 +58,18 @@ function openWindow(view) {
       preload: path.join(__dirname, '..', 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
       backgroundThrottling: true,
     },
   });
-  win.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
+  const rendererEntry = path.join(__dirname, '..', 'renderer', 'index.html');
+  // Epilogue has no embedded browser surface. Keep untrusted content out of the
+  // privileged renderer and deny popup-created BrowserWindows entirely.
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  win.webContents.on('will-navigate', (event) => {
+    if (!isTrustedRendererNavigation(event.url, rendererEntry)) event.preventDefault();
+  });
+  win.loadFile(rendererEntry);
   win.webContents.once('did-finish-load', () => {
     if (view) win.webContents.send('view:open', view);
     if (pendingAutoScan?.length) {
@@ -91,13 +100,17 @@ function openWindow(view) {
 
 function applyAppSettings(cfg) {
   try {
-    // 仅在状态变化时写登录项；未打包的开发版在 macOS 上会被拒绝，忽略即可
-    if (app.getLoginItemSettings().openAtLogin !== cfg.app.launchAtLogin) {
-      app.setLoginItemSettings({
-        openAtLogin: cfg.app.launchAtLogin,
-        openAsHidden: true, // 登录启动 → 纯托盘，不弹窗口
-        args: ['--hidden'],
-      });
+    // Electron 44 removed the legacy macOS hidden-login option. macOS reports an automatic launch
+    // through wasOpenedAtLogin; Windows keeps an explicit marker argument.
+    if (process.platform === 'darwin') {
+      if (app.getLoginItemSettings().openAtLogin !== cfg.app.launchAtLogin) {
+        app.setLoginItemSettings({ openAtLogin: cfg.app.launchAtLogin });
+      }
+    } else if (process.platform === 'win32') {
+      const options = { path: process.execPath, args: ['--hidden'] };
+      if (app.getLoginItemSettings(options).openAtLogin !== cfg.app.launchAtLogin) {
+        app.setLoginItemSettings({ openAtLogin: cfg.app.launchAtLogin, ...options });
+      }
     }
   } catch {
     /* 开发模式或受限环境 */
@@ -172,7 +185,7 @@ app.whenReady().then(() => {
   // 登录项静默启动 → 托盘 only；手动启动 → 打开界面；ToS 未同意时必须开窗展示
   const hiddenLaunch =
     process.argv.includes('--hidden') ||
-    (process.platform === 'darwin' && app.getLoginItemSettings().wasOpenedAsHidden);
+    (process.platform === 'darwin' && app.getLoginItemSettings().wasOpenedAtLogin);
   if (!hiddenLaunch || !settings.get().tosAccepted) openWindow();
   else if (process.platform === 'darwin') app.dock?.hide(); // 静默托盘启动：不占 Dock（047）
 

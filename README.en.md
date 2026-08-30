@@ -8,7 +8,7 @@ English | [中文](README.md)
 
 Open source (**ALE 1.1 & GPL-3.0**) with **zero data collection** — settings, index and vectors never leave your machine; audio/video transcription runs on-device by default.
 
-[**Download releases →**](https://github.com/wuyilingwei/epilogue/releases) (all platforms, both architectures: macOS / Windows / Linux × x64 / arm64)
+[**Download releases →**](https://github.com/wuyilingwei/epilogue/releases) (macOS arm64; Windows / Linux on x64 and arm64)
 
 ## Features
 
@@ -51,7 +51,7 @@ bash scripts/pack.sh [platform] [arch]   # local packaging
 
 Tests cover request/response conversion for all three Chat protocols, model discovery, safe body merging, plus the agent tool allowlist and settings-write boundary.
 
-Pushing a `v*` tag triggers CI builds for all platforms and architectures.
+Pushing a `v*` tag triggers CI for every supported release target. macOS Intel is temporarily excluded because the current local-model runtime no longer ships Darwin x64 binaries; this avoids publishing an installable package with broken local models.
 
 ## Privacy & License
 

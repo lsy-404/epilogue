@@ -8,7 +8,7 @@
 
 开源（**ALE 1.1 & GPL-3.0**），**不收集任何信息**——配置、索引、向量全部留在本机；音视频转写默认本机完成，音频不出设备。
 
-[**下载发布包 →**](https://github.com/wuyilingwei/epilogue/releases)（全平台双架构：macOS / Windows / Linux × x64 / arm64）
+[**下载发布包 →**](https://github.com/wuyilingwei/epilogue/releases)（macOS arm64；Windows / Linux 支持 x64 与 arm64）
 
 ## 功能
 
@@ -51,7 +51,7 @@ bash scripts/pack.sh [platform] [arch]   # 本地打包
 
 测试覆盖三类 Chat 协议的请求/响应转换、模型发现、安全请求体合并，以及 Agent 工具白名单与设置写入边界。
 
-推送 `v*` 标签即由 CI 自动构建全平台双架构发布包。
+推送 `v*` 标签即由 CI 自动构建各受支持平台发布包。macOS Intel 暂不发布：当前本地模型运行时已停止提供 Darwin x64 二进制，避免提供能安装但本地模型不可用的坏包。
 
 ## 隐私与许可
 

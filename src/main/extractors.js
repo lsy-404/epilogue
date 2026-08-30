@@ -102,11 +102,78 @@ async function extractOffice(filePath, opts) {
   return clip(text, opts.maxChars);
 }
 
+let pdfjsPromise;
+function loadPdfJs() {
+  // PDF.js 6 is ESM-only. Keep the import lazy so non-PDF extraction does not
+  // load its worker and font machinery into the model host.
+  if (!pdfjsPromise) {
+    // Electron utilityProcess does not expose browser geometry globals. PDF.js
+    // normally obtains these through createRequire(import.meta.url), but that
+    // resolver cannot cross an ASAR boundary reliably. Prime the same native
+    // canvas polyfills from CommonJS before loading the ESM bundle.
+    try {
+      const canvas = require('@napi-rs/canvas');
+      if (!globalThis.DOMMatrix) globalThis.DOMMatrix = canvas.DOMMatrix;
+      if (!globalThis.Path2D) globalThis.Path2D = canvas.Path2D;
+      if (!globalThis.ImageData) globalThis.ImageData = canvas.ImageData;
+    } catch {
+      // Text-only PDFs can still work in plain Node where PDF.js supplies its
+      // own polyfills; any real module-load failure is surfaced by import().
+    }
+    pdfjsPromise = Promise.all([
+      import('pdfjs-dist/legacy/build/pdf.mjs'),
+      import('pdfjs-dist/legacy/build/pdf.worker.mjs'),
+    ]).then(([pdfjs, worker]) => {
+      // PDF.js classifies Electron utility processes as browser-like and would
+      // otherwise try to create a Web Worker, even though no window exists.
+      // Supplying its in-process handler selects the supported fake-worker path.
+      globalThis.pdfjsWorker ||= { WorkerMessageHandler: worker.WorkerMessageHandler };
+      return pdfjs;
+    });
+  }
+  return pdfjsPromise;
+}
+
 async function extractPdf(filePath, opts) {
   if (fs.statSync(filePath).size > LIMITS.pdfBytes) return ''; // 异常巨型 PDF：跳过，凭文件名检索
-  const pdfParse = require('pdf-parse');
-  const data = await pdfParse(fs.readFileSync(filePath), { max: opts.pdfMaxPages });
-  return clip(data.text, opts.maxChars);
+  const pdfjs = await loadPdfJs();
+  const loadingTask = pdfjs.getDocument({
+    data: new Uint8Array(fs.readFileSync(filePath)),
+    // Indexing never needs PDF actions, forms or dynamic font programs. The
+    // fixed PDF.js release is the primary boundary; these flags reduce the
+    // attack surface further for untrusted local documents.
+    isEvalSupported: false,
+    enableXfa: false,
+    useWorkerFetch: false,
+    isOffscreenCanvasSupported: false,
+    isImageDecoderSupported: false,
+    disableAutoFetch: true,
+    verbosity: 0,
+  });
+
+  try {
+    const doc = await loadingTask.promise;
+    const maxPages = Math.min(doc.numPages, Math.max(1, Number(opts.pdfMaxPages) || 1));
+    const pages = [];
+    let chars = 0;
+    for (let pageNumber = 1; pageNumber <= maxPages && chars < opts.maxChars; pageNumber += 1) {
+      const page = await doc.getPage(pageNumber);
+      try {
+        const content = await page.getTextContent({ includeMarkedContent: false });
+        const text = content.items
+          .filter((item) => typeof item.str === 'string')
+          .map((item) => `${item.str}${item.hasEOL ? '\n' : ' '}`)
+          .join('');
+        pages.push(text);
+        chars += text.length;
+      } finally {
+        page.cleanup();
+      }
+    }
+    return clip(pages.join('\n'), opts.maxChars);
+  } finally {
+    await loadingTask.destroy();
+  }
 }
 
 function extractText(filePath, opts) {

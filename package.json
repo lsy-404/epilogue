@@ -1,7 +1,7 @@
 {
   "name": "epilogue",
   "productName": "Epilogue",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Epilogue — AI file workflow: understand, organize and recall your files.",
   "main": "src/main/index.js",
   "license": "SEE LICENSE IN LICENSE",
@@ -13,13 +13,19 @@
   "dependencies": {
     "@ai-sdk/openai-compatible": "^2.0.73",
     "@huggingface/transformers": "^4.2.0",
-    "adm-zip": "^0.5.16",
+    "adm-zip": "^0.6.0",
     "ai": "^6.0.271",
     "ffmpeg-static": "^5.2.0",
     "officeparser": "^6.0.7",
-    "pdf-parse": "^1.1.1"
+    "pdfjs-dist": "6.2.108"
+  },
+  "overrides": {
+    "adm-zip": "$adm-zip",
+    "pdfjs-dist": "$pdfjs-dist",
+    "sharp": "0.35.4"
   },
   "devDependencies": {
+    "@electron/asar": "4.2.0",
     "@electron/packager": "^20.0.1",
     "electron": "^44.0.0"
   }

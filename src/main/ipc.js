@@ -4,6 +4,7 @@
 const { ipcMain, dialog, shell, app, clipboard } = require('electron');
 const path = require('path');
 const settings = require('./settings');
+const { isTrustedIpcEvent } = require('./runtimeSecurity');
 
 const lazy = {
   get llm() { return require('./llm'); },
@@ -107,15 +108,22 @@ async function ask(question, mode = 'ai') {
 
 function register(getWindow, hooks = {}) {
   const progress = (channel) => (p) => getWindow()?.webContents.send(channel, p);
+  // All exposed APIs can touch local files, settings, credentials or the network.
+  // Register through one gate so newly added handlers inherit sender validation.
+  const handle = (channel, listener) =>
+    ipcMain.handle(channel, (event, ...args) => {
+      if (!isTrustedIpcEvent(event, getWindow)) throw new Error('Rejected untrusted IPC sender');
+      return listener(event, ...args);
+    });
 
-  ipcMain.handle('settings:get', () => settings.get());
-  ipcMain.handle('settings:set', (_e, patch) => {
+  handle('settings:get', () => settings.get());
+  handle('settings:set', (_e, patch) => {
     const cfg = settings.set(patch);
     hooks.onSettingsChanged?.(cfg); // 应用开机启动、重排定时扫描等
     return cfg;
   });
 
-  ipcMain.handle('folders:detect', () => {
+  handle('folders:detect', () => {
     const detected = require('./specialFolders').detect();
     // 记录到配置（去重合并）
     const recorded = settings.get().recordedFolders;
@@ -126,19 +134,19 @@ function register(getWindow, hooks = {}) {
     return merged;
   });
 
-  ipcMain.handle('dialog:pickFolder', async () => {
+  handle('dialog:pickFolder', async () => {
     const r = await dialog.showOpenDialog({ properties: ['openDirectory'] });
     return r.canceled ? null : r.filePaths[0];
   });
-  ipcMain.handle('dialog:pickFiles', async () => {
+  handle('dialog:pickFiles', async () => {
     const r = await dialog.showOpenDialog({ properties: ['openFile', 'multiSelections'] });
     return r.canceled ? [] : r.filePaths;
   });
 
-  ipcMain.handle('index:folder', (_e, dir, recursive) =>
+  handle('index:folder', (_e, dir, recursive) =>
     lazy.indexer.indexFolder(dir, getStore(), { recursive, onProgress: progress('index:progress'), manual: true })
   );
-  ipcMain.handle('index:files', async (_e, filePaths) => {
+  handle('index:files', async (_e, filePaths) => {
     const results = { ok: 0, failed: 0, errors: [] };
     for (let i = 0; i < filePaths.length; i++) {
       progress('index:progress')({ current: i + 1, total: filePaths.length, file: path.basename(filePaths[i]) });
@@ -159,70 +167,70 @@ function register(getWindow, hooks = {}) {
     return results;
   });
 
-  ipcMain.handle('store:stats', () => getStore().stats());
+  handle('store:stats', () => getStore().stats());
   // 列表瘦身：vector / transcriptPreview 渲染层用不到，不进 IPC
   const { hasVec } = require('./vectorstore');
-  ipcMain.handle('store:list', () =>
+  handle('store:list', () =>
     getStore().all().map((r) => ({ ...r, vector: undefined, transcriptPreview: undefined, hasVector: hasVec(r) }))
   );
   // 总览「最近索引」专用：主进程排序+切片，避免全量传输
-  ipcMain.handle('store:recent', (_e, n = 8) =>
+  handle('store:recent', (_e, n = 8) =>
     [...getStore().all()]
       .sort((a, b) => (b.indexedAt || '').localeCompare(a.indexedAt || ''))
       .slice(0, n)
       .map((r) => ({ filePath: r.filePath, fileName: r.fileName, kind: r.kind, summary: r.summary }))
   );
-  ipcMain.handle('store:remove', (_e, filePath) => getStore().remove(filePath));
+  handle('store:remove', (_e, filePath) => getStore().remove(filePath));
 
-  ipcMain.handle('search:ask', (_e, question, mode) => ask(question, mode));
+  handle('search:ask', (_e, question, mode) => ask(question, mode));
 
   // 手动触发归类目标额外索引（跑完为止，不设上限；定时 pass 仍限 50/轮）
-  ipcMain.handle('dest:index', () =>
+  handle('dest:index', () =>
     lazy.indexer.indexDestinations(getStore(), { onProgress: progress('index:progress'), limit: Number.MAX_SAFE_INTEGER })
   );
 
   // 内置助手对话（history: [{role, content}]）
-  ipcMain.handle('assistant:chat', (_e, history) => {
+  handle('assistant:chat', (_e, history) => {
     const assistant = require('./assistant');
     return assistant.chatTurn(Array.isArray(history) ? history : [], hooks);
   });
-  ipcMain.handle('assistant:approval', (_e, id, approved) => {
+  handle('assistant:approval', (_e, id, approved) => {
     const assistant = require('./assistant');
     return assistant.resolveApproval(String(id || ''), approved === true, hooks);
   });
 
   // 本机模型支持文件：状态 / 手动下载（带进度推送）/ 删除
-  ipcMain.handle('model:status', (_e, model) => {
+  handle('model:status', (_e, model) => {
     const localModels = require('./localModels');
     return localModels.status(model);
   });
-  ipcMain.handle('model:download', (_e, task, model) => {
+  handle('model:download', (_e, task, model) => {
     const localModels = require('./localModels');
     return localModels.download(task, model, (p) => progress('model:progress')(p));
   });
-  ipcMain.handle('model:delete', (_e, model) => {
+  handle('model:delete', (_e, model) => {
     const localModels = require('./localModels');
     return localModels.remove(model);
   });
 
   // 临时指定文件夹扫描
-  ipcMain.handle('stale:scan', (_e, dirs, days) => {
+  handle('stale:scan', (_e, dirs, days) => {
     const cfg = settings.get();
     return lazy.stale.scan(dirs, days ?? cfg.staleDays);
   });
   // 按 cleanup 配置扫描全部清理文件夹（每文件夹独立天数/规则）
-  ipcMain.handle('cleanup:scan', () => lazy.stale.scanCleanup(settings.get()));
-  ipcMain.handle('power:status', () => {
+  handle('cleanup:scan', () => lazy.stale.scanCleanup(settings.get()));
+  handle('power:status', () => {
     const { powerMonitor } = require('electron');
     return { onBattery: powerMonitor.isOnBatteryPower() };
   });
   // 渲染层上报网络是否按流量计费（navigator.connection best-effort）
-  ipcMain.handle('network:report', (_e, metered) => {
+  handle('network:report', (_e, metered) => {
     require('./network').setMetered(metered);
   });
 
   // items: 字符串路径 或 {filePath, rules}（cleanup 文件夹的单独规则）
-  ipcMain.handle('classify:suggest', async (_e, items) => {
+  handle('classify:suggest', async (_e, items) => {
     const s = getStore();
     const norm = items.map((i) => (typeof i === 'string' ? { filePath: i } : i));
     const records = [];
@@ -251,20 +259,20 @@ function register(getWindow, hooks = {}) {
     const out = records.length ? await lazy.classifier.suggest(records, (p) => progress('index:progress')(p)) : [];
     return [...out, ...failed];
   });
-  ipcMain.handle('classify:apply', (_e, moves) => lazy.classifier.applyMoves(moves, getStore()));
+  handle('classify:apply', (_e, moves) => lazy.classifier.applyMoves(moves, getStore()));
 
   // provider 连通性测试（渲染层传行内当前值，未保存的 Key 也能测）
-  ipcMain.handle('provider:test', (_e, type, provider) => lazy.llm.testProvider(type, provider));
+  handle('provider:test', (_e, type, provider) => lazy.llm.testProvider(type, provider));
 
   // IRIS Provider Source：目录只向渲染层暴露元数据，单击后由主进程校验并创建连接。
-  ipcMain.handle('providers:catalog', async (_e, force = false) => {
+  handle('providers:catalog', async (_e, force = false) => {
     const result = await require('./providerCatalog').getCatalog(force === true);
     return {
       ...result,
       providers: result.providers.map(({ models, ...provider }) => ({ ...provider, modelCount: models.length })),
     };
   });
-  ipcMain.handle('providers:sourceAdd', async (_e, sourceId) => {
+  handle('providers:sourceAdd', async (_e, sourceId) => {
     const catalog = require('./providerCatalog');
     const source = await catalog.sourceProvider(String(sourceId || ''));
     if (!source) throw new Error('Provider Source was not found.');
@@ -277,8 +285,8 @@ function register(getWindow, hooks = {}) {
   });
 
   // 官方 OAuth：PKCE 在系统浏览器完成，access/refresh token 只保存于主进程的 safeStorage 密文仓库。
-  ipcMain.handle('oauth:accounts', (_e, provider) => require('./providerOAuth').listAccounts(String(provider || '')));
-  ipcMain.handle('oauth:authorize', async (_e, provider) => {
+  handle('oauth:accounts', (_e, provider) => require('./providerOAuth').listAccounts(String(provider || '')));
+  handle('oauth:authorize', async (_e, provider) => {
     const oauth = require('./providerOAuth');
     try {
       const account = await oauth.authorize(String(provider || ''));
@@ -295,11 +303,11 @@ function register(getWindow, hooks = {}) {
       return { ok: false, reason: String(error?.message || error) };
     }
   });
-  ipcMain.handle('oauth:remove', (_e, provider, id) => ({
+  handle('oauth:remove', (_e, provider, id) => ({
     ok: require('./providerOAuth').removeAccount(String(provider || ''), String(id || '')),
   }));
 
-  ipcMain.handle('models:list', async (_e, which, candidate) => {
+  handle('models:list', async (_e, which, candidate) => {
     const cfg = settings.get();
     const provider = candidate && typeof candidate === 'object'
       ? candidate
@@ -312,22 +320,22 @@ function register(getWindow, hooks = {}) {
     return lazy.llm.listModels(provider);
   });
 
-  ipcMain.handle('shell:reveal', (_e, p) => shell.showItemInFolder(p));
-  ipcMain.handle('clipboard:write', (_e, value) => clipboard.writeText(String(value || '')));
+  handle('shell:reveal', (_e, p) => shell.showItemInFolder(p));
+  handle('clipboard:write', (_e, value) => clipboard.writeText(String(value || '')));
 
   // 关于页：版本信息（047，对齐 ../IRIS 方案）
-  ipcMain.handle('app:version', () => ({ version: app.getVersion(), electron: process.versions.electron }));
+  handle('app:version', () => ({ version: app.getVersion(), electron: process.versions.electron }));
 
   // 内置文档（048：打包后用户无项目文件，条款/许可证全文随包内置查看；051：条款为纯文本零渲染）
   const DOCS = { terms: 'TERMS.txt', license: 'LICENSE' };
-  ipcMain.handle('app:doc', (_e, name) => {
+  handle('app:doc', (_e, name) => {
     const file = DOCS[name];
     if (!file) throw new Error('unknown doc');
     return require('fs').readFileSync(path.join(app.getAppPath(), file), 'utf8');
   });
 
   // 诊断日志：在文件管理器中定位 userData/logs/epilogue.log
-  ipcMain.handle('log:reveal', () => {
+  handle('log:reveal', () => {
     const { log, logFile } = require('./log');
     log('app', 'log revealed by user');
     shell.showItemInFolder(logFile());
@@ -347,7 +355,7 @@ function register(getWindow, hooks = {}) {
     }
     return total;
   }
-  ipcMain.handle('storage:stats', () => {
+  handle('storage:stats', () => {
     const s = getStore();
     const userData = app.getPath('userData');
     let indexBytes = 0;
@@ -376,13 +384,13 @@ function register(getWindow, hooks = {}) {
     };
   });
   // 按文件类型清理索引记录（不动原文件，重新索引可恢复）
-  ipcMain.handle('storage:cleanKind', (_e, kind) => {
+  handle('storage:cleanKind', (_e, kind) => {
     const removed = getStore().removeKind(String(kind));
     getStore().flush();
     require('./log').log('app', `index records cleaned by kind: ${kind}`, { removed });
     return removed;
   });
-  ipcMain.handle('log:clear', () => {
+  handle('log:clear', () => {
     const { logFile, log } = require('./log');
     for (const f of [logFile(), `${logFile()}.old`]) fs.rmSync(f, { force: true });
     log('app', 'log cleared by user');
