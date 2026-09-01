@@ -326,7 +326,7 @@ class OAuthCredentialStore {
       id,
       provider,
       accountId: credential.accountId || accountKey,
-      label: credential.label || (provider === 'anthropic' ? 'Claude official account' : 'Official account'),
+      label: credential.label || 'Official account',
       expires: credential.expires,
       createdAt: this.now(),
       encrypted: this.encryptCredential({ ...credential, accountId: credential.accountId || accountKey }),
