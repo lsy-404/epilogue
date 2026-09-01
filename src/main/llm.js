@@ -123,12 +123,45 @@ function throttled(provider, fn) {
   return run;
 }
 
+function aggregateSseChatCompletion(payload) {
+  const text = String(payload || '').trim();
+  if (!text) throw new Error('WorkBuddy returned an empty streaming response.');
+  const events = text.split(/\r?\n/).map((line) => line.replace(/^data:\s*/, '').trim()).filter((line) => line && line !== '[DONE]');
+  const final = { choices: [{ message: { role: 'assistant', content: '', tool_calls: [] }, finish_reason: 'stop' }], usage: {} };
+  const calls = new Map();
+  let parsed = false;
+  for (const event of events) {
+    let chunk;
+    try { chunk = JSON.parse(event); } catch { continue; }
+    parsed = true;
+    if (chunk.error) throw new Error(String(chunk.error.message || chunk.error));
+    if (chunk.usage) final.usage = chunk.usage;
+    for (const choice of Array.isArray(chunk.choices) ? chunk.choices : []) {
+      const message = choice.message || choice.delta || {};
+      if (typeof message.content === 'string') final.choices[0].message.content += message.content;
+      for (const [position, item] of (Array.isArray(message.tool_calls) ? message.tool_calls : []).entries()) {
+        const index = Number.isInteger(item.index) ? item.index : position;
+        const call = calls.get(index) || { id: item.id || `call_${index + 1}`, type: 'function', function: { name: '', arguments: '' } };
+        if (item.id) call.id = item.id;
+        if (item.function?.name) call.function.name += item.function.name;
+        if (item.function?.arguments) call.function.arguments += item.function.arguments;
+        calls.set(index, call);
+      }
+      if (choice.finish_reason) final.choices[0].finish_reason = choice.finish_reason;
+    }
+  }
+  if (!parsed) throw new Error('WorkBuddy returned an invalid streaming response.');
+  final.choices[0].message.tool_calls = [...calls.values()];
+  return final;
+}
+
 async function chatCompletion(provider, messages, options = {}) {
   provider = await require('./providerOAuth').resolveProviderRecord(provider);
   if (adapters.protocolOf(provider) === adapters.PROTOCOLS.OPENAI_COMPATIBLE && provider.responseMode !== 'manual') {
     return throttled(provider, () => compatibleChatCompletion(provider, messages, options));
   }
   const body = adapters.buildChatRequest(provider, messages, options);
+  if (provider.streamResponse === true) body.stream = true;
   const res = await throttled(provider, () =>
     fetchWithRetry(
       adapters.endpointFor(provider, 'chat'),
@@ -140,7 +173,7 @@ async function chatCompletion(provider, messages, options = {}) {
       'chat'
     )
   );
-  const data = await res.json();
+  const data = provider.streamResponse === true ? aggregateSseChatCompletion(await res.text()) : await res.json();
   const completion = adapters.parseChatResponse(provider, data);
   if (!completion.text && !completion.toolCalls.length) throw new Error('chat 返回缺少文本或工具调用');
   return {
@@ -332,6 +365,7 @@ async function transcribe(provider, filePath) {
 
 async function listModels(provider) {
   provider = await require('./providerOAuth').resolveProviderRecord(provider);
+  if (Array.isArray(provider.models) && provider.models.length) return provider.models;
   const res = await fetchWithRetry(
     adapters.endpointFor(provider, 'models'),
     { headers: adapters.requestHeaders(provider) },
@@ -365,14 +399,14 @@ async function testProvider(type, provider) {
     if (!check(data)) throw new Error('返回格式异常（非 OpenAI-compatible 响应）');
   };
   if (type === 'chat') {
+    const testBody = adapters.buildChatRequest(provider, [{ role: 'user', content: 'Reply with exactly: OK' }], { maxTokens: 8, temperature: 0 });
+    if (provider.streamResponse === true) testBody.stream = true;
     let res;
     try {
       res = await fetch(adapters.endpointFor(provider, 'chat'), {
         method: 'POST',
         headers: adapters.requestHeaders(provider, { 'Content-Type': 'application/json' }),
-        body: JSON.stringify(
-          adapters.buildChatRequest(provider, [{ role: 'user', content: 'Reply with exactly: OK' }], { maxTokens: 8, temperature: 0 })
-        ),
+        body: JSON.stringify(testBody),
         signal: AbortSignal.timeout(TEST_TIMEOUT),
       });
     } catch (e) {
@@ -380,7 +414,7 @@ async function testProvider(type, provider) {
       throw e;
     }
     if (!res.ok) await raise(res, 'test');
-    const completion = adapters.parseChatResponse(provider, await res.json());
+    const completion = adapters.parseChatResponse(provider, provider.streamResponse === true ? aggregateSseChatCompletion(await res.text()) : await res.json());
     if (!completion.text && !completion.toolCalls.length) throw new Error('返回格式异常（模型协议响应为空）');
   } else if (type === 'embeddings') {
     await post('/embeddings', { model: provider.model, input: ['ping'] }, (d) => Array.isArray(d.data?.[0]?.embedding));
@@ -413,5 +447,5 @@ module.exports = {
   chat, chatCompletion, chatJson, embed, transcribe, listModels,
   chatF, chatCompletionF, chatJsonF, embedF, transcribeF,
   usable, withFailover, embeddingsConfigured, parseJsonLoose, localOnlyFilter, testProvider,
-  TIMEOUTS, adapters, // 导出供测试覆盖
+  TIMEOUTS, adapters, aggregateSseChatCompletion, // 导出供测试覆盖
 };

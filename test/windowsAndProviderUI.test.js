@@ -20,6 +20,7 @@ test('chat Add opens the Provider Source picker with OAuth actions', () => {
   assert.match(html, /id="providerSourceOverlay"/);
   assert.match(html, /data-oauth-authorize="anthropic"/);
   assert.match(html, /data-oauth-authorize="openai-codex"/);
+  assert.match(html, /data-oauth-authorize="workbuddy"/);
   assert.match(renderer, /if \(type === 'chat'\) \{\s*openProviderSource\(\)/);
   assert.match(renderer, /api\.providerSourceAdd/);
   assert.match(preload, /oauthAuthorize/);

@@ -42,6 +42,52 @@ test('OAuth presets create official Claude and Codex provider records', () => {
   assert.equal(codex.protocol, 'openai-responses');
   assert.equal(codex.baseUrl, 'https://chatgpt.com/backend-api/codex');
   assert.equal(codex.body.store, false);
+
+  const workbuddy = oauth.oauthProviderSettings('workbuddy');
+  assert.equal(workbuddy.protocol, 'openai-completions');
+  assert.equal(workbuddy.streamResponse, true);
+  assert.equal(workbuddy.requestPath, '/chat/completions');
+  assert.equal(workbuddy.headers['x-product'], 'SaaS');
+});
+
+test('WorkBuddy browser login polls for a renewable account credential', async () => {
+  const requests = [];
+  let poll = 0;
+  const credential = await oauth.authorizeInBrowser('workbuddy', {
+    signal: new AbortController().signal,
+    openExternal: async (url) => assert.equal(url, 'https://login.workbuddy.test'),
+    sleep: async () => {},
+    fetchImpl: async (url, options) => {
+      requests.push({ url: String(url), headers: Object.fromEntries(new Headers(options.headers).entries()) });
+      if (String(url).includes('/auth/state')) return new Response(JSON.stringify({ code: 0, data: { state: 'state-1', authUrl: 'https://login.workbuddy.test' } }));
+      if (String(url).includes('/auth/token')) {
+        poll += 1;
+        return new Response(JSON.stringify(poll === 1
+          ? { code: 11217, msg: 'waiting' }
+          : { code: 0, data: { accessToken: 'access', refreshToken: 'refresh', expiresIn: 3600, domain: 'tenant' } }));
+      }
+      return new Response(JSON.stringify({ code: 0, data: { uid: 'user-1', nickname: 'Rosmontis', enterpriseId: 'team-1' } }));
+    },
+  });
+  assert.equal(credential.access, 'access');
+  assert.equal(credential.refresh, 'refresh');
+  assert.equal(credential.accountId, 'user-1');
+  assert.equal(credential.enterpriseId, 'team-1');
+  assert.equal(requests[0].headers.origin, 'https://www.codebuddy.cn');
+});
+
+test('WorkBuddy token refresh keeps account routing metadata', async () => {
+  let captured;
+  const refreshed = await oauth.refreshWorkBuddy({
+    access: 'old-access', refresh: 'old-refresh', expires: 1, domain: 'tenant', enterpriseId: 'team-1', userId: 'user-1',
+  }, async (_url, options) => {
+    captured = Object.fromEntries(new Headers(options.headers).entries());
+    return new Response(JSON.stringify({ code: 0, data: { accessToken: 'new-access', refreshToken: 'new-refresh', expiresIn: 3600 } }));
+  });
+  assert.equal(refreshed.access, 'new-access');
+  assert.equal(refreshed.userId, 'user-1');
+  assert.equal(captured['x-refresh-token'], 'old-refresh');
+  assert.equal(captured['x-enterprise-id'], 'team-1');
 });
 
 test('OAuth credential store encrypts tokens and returns only redacted account metadata', async (t) => {

@@ -24,6 +24,12 @@ const CONFIGS = Object.freeze({
     scope: 'openid profile email offline_access',
     extraAuthorize: { id_token_add_organizations: 'true', codex_cli_simplified_flow: 'true', originator: 'pi' },
   },
+  workbuddy: {
+    apiBase: 'https://copilot.tencent.com/v2/plugin',
+    chatBase: 'https://copilot.tencent.com/v2',
+    origin: 'https://www.codebuddy.cn',
+    platform: 'workbuddy',
+  },
 });
 
 const cursors = new Map();
@@ -48,6 +54,126 @@ function callbackPage(ok) {
   const title = ok ? 'Authorization complete' : 'Authorization failed';
   const body = ok ? 'You can close this window and return to Epilogue.' : 'Return to Epilogue and try again.';
   return `<!doctype html><meta charset="utf-8"><title>${title}</title><style>body{font:16px system-ui;margin:48px;color:#181818}h1{font-size:24px}</style><h1>${title}</h1><p>${body}</p>`;
+}
+
+function workBuddyHeaders(config, extra = {}) {
+  return {
+    accept: 'application/json, text/plain, */*',
+    'content-type': 'application/json',
+    'x-requested-with': 'XMLHttpRequest',
+    origin: config.origin,
+    referer: `${config.origin}/`,
+    'user-agent': 'CLI/2.63.2 CodeBuddy/2.63.2',
+    ...extra,
+  };
+}
+
+function workBuddyPayload(payload, { pending = false } = {}) {
+  const code = Number(payload?.code);
+  if (code === 0 || code === 200) return payload?.data && typeof payload.data === 'object' ? payload.data : {};
+  if (pending && code === 11217) return null;
+  throw new Error(`WorkBuddy authorization failed${Number.isFinite(code) ? ` (code ${code})` : ''}: ${String(payload?.msg || payload?.message || 'unexpected response')}`);
+}
+
+function secondsToExpiry(value, now = Date.now()) {
+  const seconds = Number(value);
+  if (!Number.isFinite(seconds) || seconds <= 0) throw new Error('WorkBuddy returned an invalid token expiry.');
+  return now + seconds * 1000 - 5 * 60_000;
+}
+
+function workBuddyCredential(data, now = Date.now()) {
+  const access = String(data?.accessToken || data?.access_token || '').trim();
+  const refresh = String(data?.refreshToken || data?.refresh_token || '').trim();
+  if (!access || !refresh) throw new Error('WorkBuddy returned an incomplete renewable credential.');
+  return {
+    access,
+    refresh,
+    expires: secondsToExpiry(data?.expiresIn || data?.expires_in, now),
+    ...(typeof data?.domain === 'string' && data.domain.trim() ? { domain: data.domain.trim() } : {}),
+  };
+}
+
+function sessionFetch(fetchImpl) {
+  let cookie = '';
+  return async (url, options = {}) => {
+    const headers = new Headers(options.headers || {});
+    if (cookie) headers.set('cookie', cookie);
+    const response = await fetchImpl(url, { ...options, headers });
+    const setCookies = typeof response.headers?.getSetCookie === 'function'
+      ? response.headers.getSetCookie()
+      : [response.headers?.get?.('set-cookie')].filter(Boolean);
+    const pairs = setCookies.flatMap((entry) => String(entry).split(/,(?=\s*[^;,\s]+=)/)).map((entry) => entry.split(';', 1)[0]).filter(Boolean);
+    if (pairs.length) cookie = pairs.join('; ');
+    return response;
+  };
+}
+
+const delay = (ms, signal) => new Promise((resolve, reject) => {
+  const timer = setTimeout(resolve, ms);
+  signal?.addEventListener('abort', () => {
+    clearTimeout(timer);
+    reject(new Error('Browser authorization was cancelled.'));
+  }, { once: true });
+});
+
+async function workBuddyRequest(fetchImpl, url, options, signal, pending = false) {
+  const response = await fetchImpl(url, { ...options, signal: AbortSignal.any([signal, AbortSignal.timeout(30_000)]) });
+  if (!response.ok) throw new Error(`WorkBuddy request failed (${response.status}).`);
+  return workBuddyPayload(await response.json(), { pending });
+}
+
+async function authorizeWorkBuddy({ fetchImpl = fetch, openExternal, signal = AbortSignal.timeout(10 * 60_000), sleep = delay } = {}) {
+  if (typeof openExternal !== 'function') throw new Error('OAuth browser opener is unavailable.');
+  const config = CONFIGS.workbuddy;
+  const request = sessionFetch(fetchImpl);
+  const start = await workBuddyRequest(
+    request,
+    `${config.apiBase}/auth/state?platform=${encodeURIComponent(config.platform)}`,
+    { method: 'POST', headers: workBuddyHeaders(config), body: '{}' },
+    signal,
+  );
+  const state = String(start?.state || '').trim();
+  const authUrl = String(start?.authUrl || start?.auth_url || start?.url || '').trim();
+  if (!state || !authUrl) throw new Error('WorkBuddy authorization did not return a login URL.');
+  await openExternal(authUrl);
+  while (!signal.aborted) {
+    const token = await workBuddyRequest(request, `${config.apiBase}/auth/token?state=${encodeURIComponent(state)}`, {
+      headers: workBuddyHeaders(config),
+    }, signal, true);
+    if (token) {
+      const credential = workBuddyCredential(token);
+      try {
+        const account = await workBuddyRequest(request, `${config.apiBase}/login/account?state=${encodeURIComponent(state)}`, {
+          headers: workBuddyHeaders(config, { authorization: `Bearer ${credential.access}`, ...(credential.domain ? { 'x-domain': credential.domain } : {}) }),
+        }, signal);
+        const accountId = String(account?.uid || '').trim();
+        const label = String(account?.nickname || account?.email || accountId).trim();
+        return { ...credential, ...(accountId ? { accountId, userId: accountId } : {}), ...(label ? { label } : {}), ...(account?.enterpriseId ? { enterpriseId: String(account.enterpriseId) } : {}) };
+      } catch {
+        return credential;
+      }
+    }
+    await sleep(1500, signal);
+  }
+  throw new Error('Browser authorization was cancelled.');
+}
+
+async function refreshWorkBuddy(credential, fetchImpl = fetch) {
+  const config = CONFIGS.workbuddy;
+  const response = await fetchImpl(`${config.apiBase}/auth/token/refresh`, {
+    method: 'POST',
+    headers: workBuddyHeaders(config, {
+      authorization: `Bearer ${credential.access}`,
+      'x-refresh-token': credential.refresh,
+      ...(credential.enterpriseId ? { 'x-enterprise-id': credential.enterpriseId } : {}),
+      ...(credential.domain ? { 'x-domain': credential.domain } : {}),
+      'x-auth-refresh-source': 'workbuddy',
+    }),
+    body: '{}',
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!response.ok) throw new Error(`WorkBuddy token refresh failed (${response.status}).`);
+  return { ...credential, ...workBuddyCredential(workBuddyPayload(await response.json())) };
 }
 
 async function startCallbackServer(config, state, signal, httpImpl = http) {
@@ -97,6 +223,7 @@ async function startCallbackServer(config, state, signal, httpImpl = http) {
 }
 
 async function tokenRequest(provider, form, fetchImpl = fetch, signal = AbortSignal.timeout(30_000)) {
+  if (provider === 'workbuddy') return refreshWorkBuddy(form, fetchImpl);
   const config = CONFIGS[knownProvider(provider)];
   const openAI = config.tokenUrl.includes('openai.com');
   const response = await fetchImpl(config.tokenUrl, {
@@ -117,7 +244,8 @@ async function tokenRequest(provider, form, fetchImpl = fetch, signal = AbortSig
   return { access, refresh, expires: Date.now() + expiresIn * 1000 - 5 * 60_000, ...(accountId ? { accountId } : {}) };
 }
 
-async function authorizeInBrowser(provider, { fetchImpl = fetch, openExternal, signal = AbortSignal.timeout(10 * 60_000), httpImpl = http } = {}) {
+async function authorizeInBrowser(provider, { fetchImpl = fetch, openExternal, signal = AbortSignal.timeout(10 * 60_000), httpImpl = http, sleep } = {}) {
+  if (provider === 'workbuddy') return authorizeWorkBuddy({ fetchImpl, openExternal, signal, ...(sleep ? { sleep } : {}) });
   const config = CONFIGS[knownProvider(provider)];
   if (typeof openExternal !== 'function') throw new Error('OAuth browser opener is unavailable.');
   const verifier = crypto.randomBytes(32).toString('base64url');
@@ -190,6 +318,7 @@ class OAuthCredentialStore {
 
   upsert(provider, credential) {
     knownProvider(provider);
+    if (provider === 'workbuddy' && !credential.label) credential = { ...credential, label: 'WorkBuddy account' };
     const records = this.readRecords();
     const accountKey = credential.accountId || crypto.randomUUID();
     const id = `oauth:${provider}:${accountKey}`;
@@ -197,7 +326,7 @@ class OAuthCredentialStore {
       id,
       provider,
       accountId: credential.accountId || accountKey,
-      label: provider === 'anthropic' ? 'Claude official account' : 'ChatGPT official account',
+      label: credential.label || (provider === 'anthropic' ? 'Claude official account' : 'Official account'),
       expires: credential.expires,
       createdAt: this.now(),
       encrypted: this.encryptCredential({ ...credential, accountId: credential.accountId || accountKey }),
@@ -228,9 +357,9 @@ class OAuthCredentialStore {
 
   async refresh(provider, record, credential) {
     const config = CONFIGS[provider];
-    const next = await tokenRequest(provider, {
-      grant_type: 'refresh_token', client_id: config.clientId, refresh_token: credential.refresh,
-    }, this.fetch);
+    const next = provider === 'workbuddy'
+      ? await refreshWorkBuddy(credential, this.fetch)
+      : await tokenRequest(provider, { grant_type: 'refresh_token', client_id: config.clientId, refresh_token: credential.refresh }, this.fetch);
     const records = this.readRecords();
     const index = records.findIndex((item) => item.id === record.id);
     if (index < 0) throw new Error('OAuth account was removed while refreshing.');
@@ -276,6 +405,15 @@ function oauthProviderSettings(provider) {
       authHeader: 'Authorization', authPrefix: 'Bearer ', headers: { 'anthropic-beta': 'oauth-2025-04-20' }, model: 'claude-sonnet-4-6',
     };
   }
+  if (provider === 'workbuddy') {
+    return {
+      id: 'oauth-workbuddy', name: 'WorkBuddy OAuth', enabled: true, authType: 'oauth', oauthProvider: provider,
+      protocol: 'openai-completions', baseUrl: CONFIGS.workbuddy.chatBase, requestPath: '/chat/completions',
+      authHeader: 'Authorization', authPrefix: 'Bearer ', streamResponse: true, model: 'glm-5.2',
+      headers: workBuddyHeaders(CONFIGS.workbuddy, { 'x-product': 'SaaS' }),
+      models: ['glm-5.2', 'glm-5.1', 'glm-5v-turbo', 'kimi-k2.7', 'minimax-m3-pay', 'hy3', 'deepseek-v4-pro', 'deepseek-v4-flash'],
+    };
+  }
   return {
     id: 'oauth-openai-codex', name: 'ChatGPT Codex OAuth', enabled: true, authType: 'oauth', oauthProvider: provider,
     protocol: 'openai-responses', baseUrl: 'https://chatgpt.com/backend-api/codex', requestPath: '/responses', modelsPath: '/models',
@@ -288,6 +426,12 @@ async function resolveProviderRecord(provider) {
   const credential = await defaultStore().credentialFor(provider.oauthProvider, provider.oauthAccountId);
   const headers = { ...(provider.headers || {}) };
   if (provider.oauthProvider === 'openai-codex' && credential.accountId) headers['ChatGPT-Account-ID'] = credential.accountId;
+  if (provider.oauthProvider === 'workbuddy') {
+    if (credential.userId) headers['X-User-Id'] = credential.userId;
+    if (credential.enterpriseId) headers['X-Enterprise-Id'] = credential.enterpriseId;
+    if (credential.refresh) headers['X-Refresh-Token'] = credential.refresh;
+    if (credential.domain) headers['X-Domain'] = credential.domain;
+  }
   return { ...provider, apiKey: credential.access, apiKeys: [], keyless: true, headers };
 }
 
@@ -298,6 +442,9 @@ module.exports = {
   tokenRequest,
   startCallbackServer,
   authorizeInBrowser,
+  authorizeWorkBuddy,
+  refreshWorkBuddy,
+  workBuddyCredential,
   oauthProviderSettings,
   resolveProviderRecord,
   listAccounts: (provider) => defaultStore().list(provider),

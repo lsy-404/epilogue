@@ -77,3 +77,16 @@ test('Compatible manual mode uses response-field mappings without the SDK parser
     global.fetch = originalFetch;
   }
 });
+
+test('WorkBuddy SSE responses are aggregated into an OpenAI chat completion', () => {
+  const result = llm.aggregateSseChatCompletion([
+    'data: {"choices":[{"delta":{"content":"Hel"}}]}',
+    'data: {"choices":[{"delta":{"content":"lo","tool_calls":[{"index":0,"id":"call_1","function":{"name":"lookup","arguments":"{\\"q\\":"}}]}}]}',
+    'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\\"x\\"}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":3,"completion_tokens":2}}',
+    'data: [DONE]',
+  ].join('\n'));
+  assert.equal(result.choices[0].message.content, 'Hello');
+  assert.equal(result.choices[0].message.tool_calls[0].function.name, 'lookup');
+  assert.equal(result.choices[0].message.tool_calls[0].function.arguments, '{"q":"x"}');
+  assert.equal(result.choices[0].finish_reason, 'tool_calls');
+});

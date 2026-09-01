@@ -798,6 +798,7 @@ async function openProviderSource() {
     providerSourceLoaded ? Promise.resolve(renderProviderSourceList()) : loadProviderSources(),
     loadOAuthAccounts('anthropic'),
     loadOAuthAccounts('openai-codex'),
+    loadOAuthAccounts('workbuddy'),
   ]);
   requestAnimationFrame(() => $('#providerSourceSearch').focus());
 }
