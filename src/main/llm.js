@@ -28,6 +28,7 @@ function usable(p) {
 }
 
 function routeAllowed(provider) {
+  if (provider?.protocol === 'trae-cli') return require('./settings').get().providerRouting?.[String(provider.modelAuthProviderId)]?.oauthEnabled !== false;
   if (provider?.authType !== 'oauth' || !provider.oauthProvider) return true;
   const routing = require('./settings').get().providerRouting?.[String(provider.modelAuthProviderId || provider.oauthProvider)];
   return routing?.oauthEnabled !== false;
@@ -39,7 +40,8 @@ function localOnlyFilter(providers, localOnly) {
   return localOnly ? list.filter((p) => p.type === 'local') : list;
 }
 
-function sharedPool(provider) { return Boolean(provider?.modelAuthProviderId) && provider.protocol !== 'trae-cli'; }
+function sharedPool(provider) { return Boolean(provider?.modelAuthProviderId); }
+function routingModelId(provider) { return provider.protocol === 'trae-cli' ? 'trae-enterprise-cli' : provider.model; }
 function routerProviderId(provider) { return String(provider.modelAuthProviderId).replace(/[^a-zA-Z0-9._-]/g, '-'); }
 function poolCredentialId(provider) { return String(provider.id || provider.credentialId); }
 function errorForRouter(error) {
@@ -60,18 +62,19 @@ async function routeCandidates(list) {
   for (const provider of pooled) {
     const providerId = routerProviderId(provider);
     const credentialId = poolCredentialId(provider);
-    if (!credentialId || !provider.model) continue;
+    const modelId = routingModelId(provider);
+    if (!credentialId || !modelId) continue;
     if (!routeOrder.includes(providerId)) routeOrder.push(providerId);
-    router.upsert(core.createCredentialMetadata({ id: credentialId, providerId, authMethod: provider.authType === 'oauth' ? 'oauth' : 'api-key', enabled: provider.enabled !== false, weight: Number(provider.weight) || 1, modelIds: [provider.model] }));
+    router.upsert(core.createCredentialMetadata({ id: credentialId, providerId, authMethod: provider.authType === 'oauth' || provider.protocol === 'trae-cli' ? 'oauth' : 'api-key', enabled: provider.enabled !== false, weight: Number(provider.weight) || 1, modelIds: [modelId] }));
     router.setStrategy(cfg.providerRouting?.[provider.modelAuthProviderId]?.strategy || 'round-robin', providerId);
     router.setProviderOAuthEnabled(providerId, cfg.providerRouting?.[provider.modelAuthProviderId]?.oauthEnabled !== false);
     byCredential.set(credentialId, provider);
   }
   const ordered = [];
   for (const providerId of routeOrder) {
-    const first = pooled.find((provider) => routerProviderId(provider) === providerId && provider.model);
+    const first = pooled.find((provider) => routerProviderId(provider) === providerId && routingModelId(provider));
     if (!first) continue;
-    for (const credential of router.candidates({ providerId, modelId: first.model })) {
+    for (const credential of router.candidates({ providerId, modelId: routingModelId(first) })) {
       const provider = byCredential.get(credential.id);
       if (provider && !ordered.includes(provider)) ordered.push(provider);
     }

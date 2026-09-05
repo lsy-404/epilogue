@@ -6,15 +6,22 @@ const oauth = require('./providerOAuth');
 const settings = require('./settings');
 
 const OAUTH_PROVIDERS = new Map([
-  ['oauth:anthropic', { oauthProvider: 'anthropic', name: 'Claude Official', catalogProviderId: 'anthropic' }],
-  ['oauth:openai-codex', { oauthProvider: 'openai-codex', name: 'ChatGPT Codex', catalogProviderId: 'openai' }],
+  ['catalog:anthropic', { oauthProvider: 'anthropic', name: 'Anthropic', catalogProviderId: 'anthropic' }],
+  ['catalog:openai', { oauthProvider: 'openai-codex', name: 'OpenAI', catalogProviderId: 'openai' }],
   ['oauth:workbuddy', { oauthProvider: 'workbuddy', name: 'WorkBuddy', catalogProviderId: 'workbuddy' }],
 ]);
 const TRAE_PROVIDER_ID = 'oauth:trae-enterprise';
+const WORKBUDDY_RUNTIME_MODELS = new Set(['glm-5.2', 'glm-5.1', 'glm-5v-turbo', 'kimi-k2.7', 'minimax-m3-pay', 'hy3', 'deepseek-v4-pro', 'deepseek-v4-flash']);
+const WORKBUDDY_CATALOG_PROVIDERS = new Set(['zhipuai', 'deepseek', 'tencent-tokenhub']);
+
+function modelsForOauth(definition, listed) {
+  if (definition.oauthProvider !== 'workbuddy') return listed.find((source) => source.id === definition.catalogProviderId)?.models.map((model) => model.id) || [];
+  return listed.filter((source) => WORKBUDDY_CATALOG_PROVIDERS.has(source.id)).flatMap((source) => source.models.map((model) => model.id)).filter((id, index, all) => WORKBUDDY_RUNTIME_MODELS.has(id) && all.indexOf(id) === index);
+}
 
 function routeId(provider) {
   if (provider?.protocol === 'trae-cli') return TRAE_PROVIDER_ID;
-  if (provider?.authType === 'oauth' && provider.oauthProvider) return `oauth:${provider.oauthProvider}`;
+  if (provider?.authType === 'oauth' && provider.oauthProvider) return [...OAUTH_PROVIDERS].find(([, definition]) => definition.oauthProvider === provider.oauthProvider)?.[0] || `oauth:${provider.oauthProvider}`;
   if (provider?.source?.provider) return `catalog:${provider.source.provider}`;
   return String(provider?.modelAuthProviderId || provider?.id || 'custom');
 }
@@ -24,11 +31,11 @@ async function traeProvider(records) {
   const sessions = records.filter((record) => record.protocol === 'trae-cli');
   const probe = await trae.status({ homeDir: trae.sessionHome('probe') });
   const statuses = await Promise.all(sessions.map(async (record) => ({ record, status: await trae.status({ homeDir: record.traeHome, label: record.name, host: record.traeHost }) })));
-  const models = [...new Set(statuses.flatMap(({ status }) => Array.isArray(status.models) ? status.models.filter((model) => typeof model === 'string') : []))];
+  const options = providerOptions(settings.get(), TRAE_PROVIDER_ID);
   return {
     id: TRAE_PROVIDER_ID, name: 'Trae Enterprise CLI', description: probe.available ? 'Enterprise CLI session' : 'Enterprise CLI is not available on this device', authMethods: ['oauth'], available: probe.available === true,
-    unavailableReason: probe.available === true ? null : 'Trae Enterprise CLI is not installed or cannot be started.', oauthEnabled: true, loadStrategy: 'failover', models, oauthModels: models,
-    oauthCredentials: statuses.map(({ record, status }) => ({ id: credentialId(record), label: record.name || 'Trae Enterprise CLI', healthy: status.authenticated === true, enabled: record.enabled !== false, weight: Number.isInteger(record.weight) ? record.weight : 1, models, cooldownUntilUtc: null })),
+    unavailableReason: probe.available === true ? null : 'Trae Enterprise CLI is not installed or cannot be started.', oauthEnabled: options.oauthEnabled !== false, loadStrategy: options.strategy, models: [], oauthModels: [],
+    oauthCredentials: statuses.map(({ record, status }) => ({ id: credentialId(record), label: status.sessionLabel || record.name || 'Trae Enterprise CLI', healthy: status.authenticated === true, enabled: record.enabled !== false, weight: Number.isInteger(record.weight) ? record.weight : 1, models: [], cooldownUntilUtc: null })),
   };
 }
 function credentialId(provider) { return String(provider.credentialId || provider.oauthAccountId || provider.id || ''); }
@@ -68,17 +75,25 @@ async function state() {
       id: credentialId(record), label: record.name || source.name, healthy: true, enabled: record.enabled !== false,
       weight: Number.isInteger(record.weight) ? record.weight : 1, models: source.models.map((model) => model.id),
     }));
-    return { id, name: source.name, description: source.package, authMethods: ['api-key'], available: true,
-      loadStrategy: options.strategy, models: source.models.map((model) => model.id), apiKeyModels: source.models.map((model) => model.id), apiKeyCredentials: credentials };
+    const oauthDefinition = OAUTH_PROVIDERS.get(id);
+    const accounts = oauthDefinition ? oauth.listAccounts(oauthDefinition.oauthProvider) : [];
+    const linked = oauthDefinition ? records.filter((record) => record.authType === 'oauth' && routeId(record) === id) : [];
+    const models = source.models.map((model) => model.id);
+    return { id, name: source.name, description: source.package, authMethods: oauthDefinition ? ['oauth', 'api-key'] : ['api-key'], available: true,
+      oauthEnabled: options.oauthEnabled !== false, loadStrategy: options.strategy, models, oauthModels: oauthDefinition ? models : [], apiKeyModels: models, apiKeyCredentials: credentials,
+      ...(oauthDefinition ? { oauthCredentials: accounts.map((account) => {
+        const record = linked.find((candidate) => credentialId(candidate) === account.id);
+        return { id: account.id, label: account.label || oauthDefinition.name, account: account.accountId, healthy: true, enabled: record ? record.enabled !== false : false, weight: Number.isInteger(record?.weight) ? record.weight : 1, models, cooldownUntilUtc: null };
+      }) } : {}) };
   });
-  const oauthProviders = [...OAUTH_PROVIDERS].map(([id, definition]) => {
+  const oauthProviders = [...OAUTH_PROVIDERS].filter(([id]) => !id.startsWith('catalog:')).map(([id, definition]) => {
     const options = providerOptions(cfg, id);
     const accounts = oauth.listAccounts(definition.oauthProvider);
     const linked = records.filter((record) => record.authType === 'oauth' && (routeId(record) === id || record.oauthProvider === definition.oauthProvider));
-    const models = listed.find((source) => source.id === definition.catalogProviderId)?.models.map((model) => model.id) || [];
+    const models = modelsForOauth(definition, listed);
     return {
-      id, name: definition.name, description: 'Official OAuth', authMethods: ['oauth'], available: true,
-      oauthEnabled: options.oauthEnabled !== false, loadStrategy: options.strategy, models, oauthModels: models,
+      id, name: definition.name, description: models.length ? 'Official OAuth' : 'No compatible models.dev runtime binding', authMethods: ['oauth'], available: models.length > 0,
+      unavailableReason: models.length ? null : 'No verified models.dev runtime binding is available.', oauthEnabled: options.oauthEnabled !== false, loadStrategy: options.strategy, models, oauthModels: models,
       oauthCredentials: accounts.map((account) => {
         const record = linked.find((candidate) => credentialId(candidate) === account.id);
         return { id: account.id, label: account.label || definition.name, account: account.accountId, healthy: true,
@@ -109,8 +124,7 @@ async function execute(action, { signal } = {}) {
       const session = trae.newSession();
       const result = await trae.login(session, signal);
       const cfg = settings.get();
-      const model = Array.isArray(result.models) && typeof result.models[0] === 'string' ? result.models[0] : '';
-      settings.set({ providers: { chat: [...(cfg.providers.chat || []), { id: `trae-route:${session.id}`, name: 'Trae Enterprise CLI', protocol: 'trae-cli', authType: 'trae-cli', credentialId: session.id, modelAuthProviderId: TRAE_PROVIDER_ID, traeHome: session.homeDir, model, weight: 1, enabled: true }] } });
+      settings.set({ providers: { chat: [...(cfg.providers.chat || []), { id: `trae-route:${session.id}`, name: result.sessionLabel || 'Trae Enterprise CLI', protocol: 'trae-cli', authType: 'trae-cli', credentialId: session.id, modelAuthProviderId: TRAE_PROVIDER_ID, traeHome: session.homeDir, model: '', weight: 1, enabled: true }] } });
       return;
     }
     const definition = OAUTH_PROVIDERS.get(providerId);
@@ -121,6 +135,7 @@ async function execute(action, { signal } = {}) {
     const id = account.id;
     const reconnectId = String(action.credentialId || '');
     const replaced = (cfg.providers.chat || []).find((record) => reconnectId && record.authType === 'oauth' && routeId(record) === providerId && credentialId(record) === reconnectId);
+    if (reconnectId && reconnectId !== id) oauth.removeAccount(definition.oauthProvider, reconnectId);
     const chat = (cfg.providers.chat || []).filter((record) => !(record.authType === 'oauth' && routeId(record) === providerId && (credentialId(record) === id || credentialId(record) === reconnectId)));
     chat.push({ ...preset, ...(replaced ? { enabled: replaced.enabled, weight: replaced.weight, model: replaced.model } : {}), id: `oauth-route:${definition.oauthProvider}:${id}`, oauthAccountId: id, credentialId: id, modelAuthProviderId: providerId, weight: replaced?.weight || 1, enabled: replaced?.enabled !== false });
     settings.set({ providers: { chat } });

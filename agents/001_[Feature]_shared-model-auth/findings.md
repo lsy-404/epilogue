@@ -10,3 +10,5 @@
 - [开关] provider OAuth 总开关在 `llm.withFailover` 前过滤 OAuth route；各账户自己的 enabled 状态仍独立保留，重新开启 provider 时无需重连或重设权重。
 - [审查] 原 host 未监听 reconnect 事件、OAuth/API provider ID 可冲突、OAuth 模型列表为静态值，且选择模型会批量写路由；这些都必须在本任务完成前修复。
 - [审查] 手写加权轮换重复了共享 core 的 CredentialRouter；账户池路由应改用 core 并回报实际成功/失败以保留 cooldown 和永久认证失败状态。
+- [复审] Trae status 不含 models；不从不存在字段取值。Anthropic/OpenAI OAuth 与 API key 合并到同一 canonical models.dev runtime；WorkBuddy 缺失 runtime binding 时不可用。
+- [WorkBuddy] 原生 verified runtime ID 列表只与 zhipuai、deepseek、tencent-tokenhub 的 models.dev 原始 model ID 做逐字交集；未命中的 capability 和任何别名均不展示。

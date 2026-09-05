@@ -50,6 +50,13 @@ test('OAuth presets create official Claude and Codex provider records', async ()
   assert.equal(workbuddy.headers['x-product'], 'SaaS');
 });
 
+test('WorkBuddy native models remain an explicit bounded capability list', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../src/main/modelAuth.js'), 'utf8');
+  assert.match(source, /WORKBUDDY_RUNTIME_MODELS/);
+  assert.match(source, /WORKBUDDY_CATALOG_PROVIDERS/);
+  assert.match(source, /WORKBUDDY_RUNTIME_MODELS\.has\(id\)/);
+});
+
 test('WorkBuddy browser login polls for a renewable account credential', async () => {
   const requests = [];
   let poll = 0;
