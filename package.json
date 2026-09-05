@@ -13,9 +13,9 @@
   "dependencies": {
     "@ai-sdk/openai-compatible": "^2.0.73",
     "@huggingface/transformers": "^4.2.0",
-    "@model-auth/providers": "https://github.com/wuyilingwei/model-auth/releases/download/v0.2.0/model-auth-providers-0.2.0.tgz",
-    "@model-auth/core": "https://github.com/wuyilingwei/model-auth/releases/download/v0.2.0/model-auth-core-0.2.0.tgz",
-    "@model-auth/vue": "https://github.com/wuyilingwei/model-auth/releases/download/v0.1.0/model-auth-vue-0.1.0.tgz",
+    "@model-auth/providers": "https://github.com/lsy-404/model-auth/releases/download/v0.2.0/model-auth-providers-0.2.0.tgz",
+    "@model-auth/core": "https://github.com/lsy-404/model-auth/releases/download/v0.2.0/model-auth-core-0.2.0.tgz",
+    "@model-auth/vue": "https://github.com/lsy-404/model-auth/releases/download/v0.2.0/model-auth-vue-0.2.0.tgz",
     "adm-zip": "^0.6.0",
     "ai": "^6.0.271",
     "ffmpeg-static": "^5.2.0",

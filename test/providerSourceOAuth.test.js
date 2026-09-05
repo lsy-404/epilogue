@@ -62,10 +62,10 @@ test('WorkBuddy browser login polls for a renewable account credential', async (
   let poll = 0;
   const credential = await oauth.authorizeInBrowser('workbuddy', {
     signal: new AbortController().signal,
-    openExternal: async (url) => assert.equal(url, 'https://copilot.tencent.com/login?state=state-1'),
+    openExternal: async (url) => assert.equal(url, 'https://copilot.tencent.com/login?state=state-1&platform=workbuddy'),
     fetchImpl: async (url, options) => {
       requests.push({ url: String(url), headers: Object.fromEntries(new Headers(options.headers).entries()) });
-      if (String(url).includes('/auth/state')) return new Response(JSON.stringify({ code: 0, data: { state: 'state-1', authUrl: 'https://copilot.tencent.com/login?state=state-1' } }));
+      if (String(url).includes('/auth/state')) return new Response(JSON.stringify({ code: 0, data: { state: 'state-1', authUrl: 'https://copilot.tencent.com/login?state=state-1&platform=workbuddy' } }));
       if (String(url).includes('/auth/token')) {
         poll += 1;
         return new Response(JSON.stringify({ code: 0, data: { accessToken: 'access', refreshToken: 'refresh', expiresIn: 3600, domain: 'tenant' } }));

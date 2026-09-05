@@ -4,3 +4,4 @@
 - 2026-09-05：检查 Epilogue 当前 provider host；未发现已实现的 TraeProvider 或可验证 CLI 二进制接口，因此未修改运行时代码。
 - 2026-09-05：新增严格的 Trae CLI host adapter：每一 session 使用 app-owned absolute TRAE_HOME，stdout 只按 JSONL completed/result、assistant、tool events 解析。
 - 2026-09-05：改为只消费共享 TraeProvider 的 structured assistantText；macOS arm64 app package 成功生成，尚缺企业 CLI 实机验证。
+- 2026-09-05：安装 canonical lsy-404 GitHub Release v0.2.0 core、providers、Vue archives，并以新 WorkBuddy URL 校验规则更新测试 fixture。
