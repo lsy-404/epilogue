@@ -232,7 +232,7 @@
 
       <div class="tab-page hidden" id="tab-capabilities">
         <div class="panel">
-          <div class="panel-head"><h2 data-i18n="prov_chat"></h2><button class="btn ghost" data-add-provider="chat" data-i18n="prov_add"></button></div>
+          <div class="panel-head"><h2 data-i18n="prov_chat"></h2><button class="btn ghost" id="modelAuthOpen" data-i18n="prov_add"></button></div>
           <div class="provider-list" id="providers-chat"></div>
           <p class="hint" data-i18n="drag_hint"></p>
           <p class="hint" data-i18n="prov_hint_chat"></p>
@@ -311,45 +311,7 @@
   <!-- WinUI flyouts: protocol/language/model pickers and context menus share one portal. -->
   <div class="flyout-layer" id="flyoutLayer"></div>
 
-  <!-- IRIS Provider Source picker + official OAuth accounts -->
-  <div class="dialog-overlay hidden" id="providerSourceOverlay">
-    <section class="settings-dialog provider-source-dialog" role="dialog" aria-modal="true" aria-labelledby="providerSourceTitle">
-      <header class="dialog-head">
-        <div><span class="eyebrow">PROVIDER SOURCE</span><h2 id="providerSourceTitle" data-i18n="source_title"></h2></div>
-        <button type="button" class="x-btn" id="providerSourceClose" aria-label="Close">✕</button>
-      </header>
-
-      <div class="oauth-source-grid">
-        <article class="oauth-source-card">
-          <div><strong data-i18n="oauth_claude"></strong><small data-i18n="oauth_claude_hint"></small></div>
-          <button type="button" class="btn primary" data-oauth-authorize="anthropic" data-i18n="oauth_authorize"></button>
-          <div class="oauth-account-list" data-oauth-accounts="anthropic"></div>
-        </article>
-        <article class="oauth-source-card">
-          <div><strong data-i18n="oauth_codex"></strong><small data-i18n="oauth_codex_hint"></small></div>
-          <button type="button" class="btn primary" data-oauth-authorize="openai-codex" data-i18n="oauth_authorize"></button>
-          <div class="oauth-account-list" data-oauth-accounts="openai-codex"></div>
-        </article>
-        <article class="oauth-source-card">
-          <div><strong data-i18n="oauth_workbuddy"></strong><small data-i18n="oauth_workbuddy_hint"></small></div>
-          <button type="button" class="btn primary" data-oauth-authorize="workbuddy" data-i18n="oauth_authorize"></button>
-          <div class="oauth-account-list" data-oauth-accounts="workbuddy"></div>
-        </article>
-      </div>
-
-      <div class="source-catalog-head">
-        <div><strong data-i18n="source_catalog"></strong><small data-i18n="source_catalog_hint"></small></div>
-        <button type="button" class="mini-btn" id="providerSourceRefresh" data-i18n="source_refresh"></button>
-      </div>
-      <input type="search" class="source-search" id="providerSourceSearch" data-i18n-ph="source_search" />
-      <div class="provider-source-list" id="providerSourceList"></div>
-      <p class="form-error hidden" id="providerSourceError"></p>
-      <footer class="dialog-actions source-actions">
-        <button type="button" class="btn ghost" id="providerSourceCustom" data-i18n="source_custom"></button>
-        <button type="button" class="btn" id="providerSourceCancel" data-i18n="chat_reject"></button>
-      </footer>
-    </section>
-  </div>
+  <model-auth-dialog></model-auth-dialog>
 
   <!-- Provider compatible API advanced editor -->
   <div class="dialog-overlay hidden" id="providerAdvancedOverlay">
@@ -404,5 +366,6 @@
   <script src="../shared/locales.js"></script>
   <script src="../shared/imageModels.js"></script>
   <script src="app.js"></script>
+  <script type="module" src="modelAuth.js"></script>
 </body>
 </html>

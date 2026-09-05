@@ -14,6 +14,7 @@ const lazy = {
 };
 
 let store;
+const modelAuthOperations = new Map();
 
 function getStore() {
   if (!store) {
@@ -294,7 +295,7 @@ function register(getWindow, hooks = {}) {
     const oauth = require('./providerOAuth');
     try {
       const account = await oauth.authorize(String(provider || ''));
-      const preset = oauth.oauthProviderSettings(String(provider || ''));
+      const preset = await oauth.oauthProviderSettings(String(provider || ''));
       const cfg = settings.get();
       const chat = [...cfg.providers.chat];
       const index = chat.findIndex((item) => item.oauthProvider === preset.oauthProvider);
@@ -310,6 +311,27 @@ function register(getWindow, hooks = {}) {
   handle('oauth:remove', (_e, provider, id) => ({
     ok: require('./providerOAuth').removeAccount(String(provider || ''), String(id || '')),
   }));
+
+  handle('model-auth:state', () => require('./modelAuth').state());
+  handle('model-auth:execute', async (_e, action, operationId) => {
+    const id = String(operationId || '');
+    if (!id || modelAuthOperations.has(id)) throw new Error('Invalid model-auth operation.');
+    const controller = new AbortController();
+    modelAuthOperations.set(id, controller);
+    try {
+      await require('./modelAuth').execute(action, { signal: controller.signal });
+      const cfg = settings.get();
+      hooks.onSettingsChanged?.(cfg);
+    } finally {
+      modelAuthOperations.delete(id);
+    }
+  });
+  handle('model-auth:cancel', (_e, operationId) => {
+    const controller = modelAuthOperations.get(String(operationId || ''));
+    if (!controller) return false;
+    controller.abort();
+    return true;
+  });
 
   handle('models:list', async (_e, which, candidate) => {
     const cfg = settings.get();

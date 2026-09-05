@@ -162,7 +162,6 @@ function applyI18n() {
   for (const el of document.querySelectorAll('[data-i18n-ph]')) el.placeholder = t(el.dataset.i18nPh);
   for (const el of document.querySelectorAll('[data-i18n-html]')) el.innerHTML = t(el.dataset.i18nHtml);
   syncSelectProxies();
-  if (providerSourceLoaded) renderProviderSourceList($('#providerSourceSearch').value);
 }
 
 /* ---------- 导航 ---------- */
@@ -805,6 +804,7 @@ async function openProviderSource() {
 
 function closeProviderSource() { $('#providerSourceOverlay').classList.add('hidden'); }
 
+if ($('#providerSourceOverlay')) {
 $('#providerSourceSearch').addEventListener('input', (e) => renderProviderSourceList(e.target.value));
 $('#providerSourceRefresh').addEventListener('click', () => loadProviderSources(true));
 $('#providerSourceClose').addEventListener('click', closeProviderSource);
@@ -866,6 +866,7 @@ $('#providerSourceCustom').addEventListener('click', () => {
   closeProviderSource();
   autoSaveNow('settings');
 });
+}
 
 const PROVIDER_TYPES = ['chat', 'embeddings', 'transcription'];
 
@@ -974,7 +975,7 @@ $('#providerAdvancedForm').addEventListener('submit', async (e) => {
 });
 window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !$('#providerAdvancedOverlay').classList.contains('hidden')) closeProviderAdvanced();
-  if (e.key === 'Escape' && !$('#providerSourceOverlay').classList.contains('hidden')) closeProviderSource();
+  if (e.key === 'Escape' && $('#providerSourceOverlay') && !$('#providerSourceOverlay').classList.contains('hidden')) closeProviderSource();
 });
 
 // 下载速度统计：进度事件按网络 chunk 高频到达，瞬时速度噪声极大 →
@@ -1110,7 +1111,7 @@ document.body.addEventListener('change', (e) => {
 
 document.body.addEventListener('click', async (e) => {
   const oauthManage = e.target.closest('[data-oauth-manage]');
-  if (oauthManage) await openProviderSource();
+  if (oauthManage) window.openModelAuth?.();
   const advanced = e.target.closest('[data-p-advanced]');
   if (advanced) openProviderAdvanced(+advanced.dataset.pAdvanced);
   const discover = e.target.closest('[data-p-models]');
@@ -1332,7 +1333,7 @@ document.body.addEventListener('click', (e) => {
   if (add) {
     const type = add.dataset.addProvider;
     if (type === 'chat') {
-      openProviderSource();
+      window.openModelAuth?.();
       return;
     }
     currentSettings.providers[type].push({ name: '', baseUrl: '', apiKey: '', model: '' });

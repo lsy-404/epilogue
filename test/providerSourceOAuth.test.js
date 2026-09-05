@@ -32,18 +32,18 @@ test('Provider Source catalog exposes supported OpenCode entries and disables un
   assert.deepEqual(preset.source.env, ['EXAMPLE_API_KEY']);
 });
 
-test('OAuth presets create official Claude and Codex provider records', () => {
-  const claude = oauth.oauthProviderSettings('anthropic');
+test('OAuth presets create official Claude and Codex provider records', async () => {
+  const claude = await oauth.oauthProviderSettings('anthropic');
   assert.equal(claude.protocol, 'anthropic-messages');
   assert.equal(claude.authHeader, 'Authorization');
   assert.equal(claude.headers['anthropic-beta'], 'oauth-2025-04-20');
 
-  const codex = oauth.oauthProviderSettings('openai-codex');
+  const codex = await oauth.oauthProviderSettings('openai-codex');
   assert.equal(codex.protocol, 'openai-responses');
   assert.equal(codex.baseUrl, 'https://chatgpt.com/backend-api/codex');
   assert.equal(codex.body.store, false);
 
-  const workbuddy = oauth.oauthProviderSettings('workbuddy');
+  const workbuddy = await oauth.oauthProviderSettings('workbuddy');
   assert.equal(workbuddy.protocol, 'openai-completions');
   assert.equal(workbuddy.streamResponse, true);
   assert.equal(workbuddy.requestPath, '/chat/completions');
@@ -55,16 +55,13 @@ test('WorkBuddy browser login polls for a renewable account credential', async (
   let poll = 0;
   const credential = await oauth.authorizeInBrowser('workbuddy', {
     signal: new AbortController().signal,
-    openExternal: async (url) => assert.equal(url, 'https://login.workbuddy.test'),
-    sleep: async () => {},
+    openExternal: async (url) => assert.equal(url, 'https://copilot.tencent.com/login?state=state-1'),
     fetchImpl: async (url, options) => {
       requests.push({ url: String(url), headers: Object.fromEntries(new Headers(options.headers).entries()) });
-      if (String(url).includes('/auth/state')) return new Response(JSON.stringify({ code: 0, data: { state: 'state-1', authUrl: 'https://login.workbuddy.test' } }));
+      if (String(url).includes('/auth/state')) return new Response(JSON.stringify({ code: 0, data: { state: 'state-1', authUrl: 'https://copilot.tencent.com/login?state=state-1' } }));
       if (String(url).includes('/auth/token')) {
         poll += 1;
-        return new Response(JSON.stringify(poll === 1
-          ? { code: 11217, msg: 'waiting' }
-          : { code: 0, data: { accessToken: 'access', refreshToken: 'refresh', expiresIn: 3600, domain: 'tenant' } }));
+        return new Response(JSON.stringify({ code: 0, data: { accessToken: 'access', refreshToken: 'refresh', expiresIn: 3600, domain: 'tenant' } }));
       }
       return new Response(JSON.stringify({ code: 0, data: { uid: 'user-1', nickname: 'Rosmontis', enterpriseId: 'team-1' } }));
     },

@@ -13,17 +13,22 @@ test('Windows and Linux clear Electron default File/Edit application menus', () 
   assert.match(source, /process\.platform !== 'darwin'\) Menu\.setApplicationMenu\(null\)/);
 });
 
-test('chat Add opens the Provider Source picker with OAuth actions', () => {
+test('chat Add opens the shared model-auth element through the trusted host', () => {
   const html = read('src/renderer/index.html');
   const renderer = read('src/renderer/app.js');
   const preload = read('src/preload.js');
-  assert.match(html, /id="providerSourceOverlay"/);
-  assert.match(html, /data-oauth-authorize="anthropic"/);
-  assert.match(html, /data-oauth-authorize="openai-codex"/);
-  assert.match(html, /data-oauth-authorize="workbuddy"/);
-  assert.match(renderer, /if \(type === 'chat'\) \{\s*openProviderSource\(\)/);
-  assert.match(renderer, /api\.providerSourceAdd/);
-  assert.match(preload, /oauthAuthorize/);
+  const shared = read('src/renderer/modelAuth.js');
+  const ipc = read('src/main/ipc.js');
+  assert.match(html, /<model-auth-dialog><\/model-auth-dialog>/);
+  assert.match(html, /id="modelAuthOpen"/);
+  assert.doesNotMatch(html, /id="providerSourceOverlay"/);
+  assert.match(shared, /registerModelAuthElement/);
+  assert.match(shared, /modelAuthExecute/);
+  assert.match(shared, /modelAuthCancel/);
+  assert.match(preload, /modelAuthState/);
+  assert.match(preload, /modelAuthCancel/);
+  assert.match(ipc, /model-auth:execute/);
+  assert.match(ipc, /model-auth:cancel/);
 });
 
 test('file moves expose a persisted undo action through the trusted preload bridge', () => {

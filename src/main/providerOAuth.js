@@ -35,6 +35,8 @@ const CONFIGS = Object.freeze({
 const cursors = new Map();
 let singleton = null;
 
+function workBuddyProtocol() { return import('@model-auth/providers/workbuddy'); }
+
 function knownProvider(provider) {
   if (!CONFIGS[provider]) throw new Error('Unknown OAuth provider.');
   return provider;
@@ -123,57 +125,13 @@ async function workBuddyRequest(fetchImpl, url, options, signal, pending = false
 }
 
 async function authorizeWorkBuddy({ fetchImpl = fetch, openExternal, signal = AbortSignal.timeout(10 * 60_000), sleep = delay } = {}) {
-  if (typeof openExternal !== 'function') throw new Error('OAuth browser opener is unavailable.');
-  const config = CONFIGS.workbuddy;
-  const request = sessionFetch(fetchImpl);
-  const start = await workBuddyRequest(
-    request,
-    `${config.apiBase}/auth/state?platform=${encodeURIComponent(config.platform)}`,
-    { method: 'POST', headers: workBuddyHeaders(config), body: '{}' },
-    signal,
-  );
-  const state = String(start?.state || '').trim();
-  const authUrl = String(start?.authUrl || start?.auth_url || start?.url || '').trim();
-  if (!state || !authUrl) throw new Error('WorkBuddy authorization did not return a login URL.');
-  await openExternal(authUrl);
-  while (!signal.aborted) {
-    const token = await workBuddyRequest(request, `${config.apiBase}/auth/token?state=${encodeURIComponent(state)}`, {
-      headers: workBuddyHeaders(config),
-    }, signal, true);
-    if (token) {
-      const credential = workBuddyCredential(token);
-      try {
-        const account = await workBuddyRequest(request, `${config.apiBase}/login/account?state=${encodeURIComponent(state)}`, {
-          headers: workBuddyHeaders(config, { authorization: `Bearer ${credential.access}`, ...(credential.domain ? { 'x-domain': credential.domain } : {}) }),
-        }, signal);
-        const accountId = String(account?.uid || '').trim();
-        const label = String(account?.nickname || account?.email || accountId).trim();
-        return { ...credential, ...(accountId ? { accountId, userId: accountId } : {}), ...(label ? { label } : {}), ...(account?.enterpriseId ? { enterpriseId: String(account.enterpriseId) } : {}) };
-      } catch {
-        return credential;
-      }
-    }
-    await sleep(1500, signal);
-  }
-  throw new Error('Browser authorization was cancelled.');
+  const protocol = await workBuddyProtocol();
+  return protocol.authorizeWorkBuddy({ openExternal, fetchImpl, signal });
 }
 
 async function refreshWorkBuddy(credential, fetchImpl = fetch) {
-  const config = CONFIGS.workbuddy;
-  const response = await fetchImpl(`${config.apiBase}/auth/token/refresh`, {
-    method: 'POST',
-    headers: workBuddyHeaders(config, {
-      authorization: `Bearer ${credential.access}`,
-      'x-refresh-token': credential.refresh,
-      ...(credential.enterpriseId ? { 'x-enterprise-id': credential.enterpriseId } : {}),
-      ...(credential.domain ? { 'x-domain': credential.domain } : {}),
-      'x-auth-refresh-source': 'workbuddy',
-    }),
-    body: '{}',
-    signal: AbortSignal.timeout(30_000),
-  });
-  if (!response.ok) throw new Error(`WorkBuddy token refresh failed (${response.status}).`);
-  return { ...credential, ...workBuddyCredential(workBuddyPayload(await response.json())) };
+  const protocol = await workBuddyProtocol();
+  return protocol.refreshWorkBuddy(credential, { fetchImpl });
 }
 
 async function startCallbackServer(config, state, signal, httpImpl = http) {
@@ -347,10 +305,11 @@ class OAuthCredentialStore {
     return true;
   }
 
-  async authorize(provider) {
+  async authorize(provider, { signal } = {}) {
     const credential = await authorizeInBrowser(provider, {
       fetchImpl: this.fetch,
       openExternal: (url) => this.shell.openExternal(url),
+      signal,
     });
     return this.upsert(provider, credential);
   }
@@ -396,7 +355,7 @@ function defaultStore() {
   return singleton;
 }
 
-function oauthProviderSettings(provider) {
+async function oauthProviderSettings(provider) {
   knownProvider(provider);
   if (provider === 'anthropic') {
     return {
@@ -406,11 +365,12 @@ function oauthProviderSettings(provider) {
     };
   }
   if (provider === 'workbuddy') {
+    const { WORKBUDDY_ENDPOINTS } = await workBuddyProtocol();
     return {
       id: 'oauth-workbuddy', name: 'WorkBuddy OAuth', enabled: true, authType: 'oauth', oauthProvider: provider,
-      protocol: 'openai-completions', baseUrl: CONFIGS.workbuddy.chatBase, requestPath: '/chat/completions',
+      protocol: 'openai-completions', baseUrl: WORKBUDDY_ENDPOINTS.chatBase, requestPath: '/chat/completions',
       authHeader: 'Authorization', authPrefix: 'Bearer ', streamResponse: true, model: 'glm-5.2',
-      headers: workBuddyHeaders(CONFIGS.workbuddy, { 'x-product': 'SaaS' }),
+      headers: { 'x-product': 'SaaS' },
       models: ['glm-5.2', 'glm-5.1', 'glm-5v-turbo', 'kimi-k2.7', 'minimax-m3-pay', 'hy3', 'deepseek-v4-pro', 'deepseek-v4-flash'],
     };
   }
@@ -427,10 +387,7 @@ async function resolveProviderRecord(provider) {
   const headers = { ...(provider.headers || {}) };
   if (provider.oauthProvider === 'openai-codex' && credential.accountId) headers['ChatGPT-Account-ID'] = credential.accountId;
   if (provider.oauthProvider === 'workbuddy') {
-    if (credential.userId) headers['X-User-Id'] = credential.userId;
-    if (credential.enterpriseId) headers['X-Enterprise-Id'] = credential.enterpriseId;
-    if (credential.refresh) headers['X-Refresh-Token'] = credential.refresh;
-    if (credential.domain) headers['X-Domain'] = credential.domain;
+    Object.assign(headers, (await workBuddyProtocol()).workBuddyHeaders(credential));
   }
   return { ...provider, apiKey: credential.access, apiKeys: [], keyless: true, headers };
 }
@@ -448,6 +405,6 @@ module.exports = {
   oauthProviderSettings,
   resolveProviderRecord,
   listAccounts: (provider) => defaultStore().list(provider),
-  authorize: (provider) => defaultStore().authorize(provider),
+  authorize: (provider, options) => defaultStore().authorize(provider, options),
   removeAccount: (provider, id) => defaultStore().remove(provider, id),
 };

@@ -5,6 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const adapters = require('./providerAdapters');
 const compatibleKeyCursors = new Map();
+const routeCursors = new Map();
 let compatibleSdkPromise = null;
 
 function headers(provider, extra = {}) {
@@ -25,15 +26,44 @@ function usable(p) {
   return Boolean(p.baseUrl && (p.keyless || p.apiKey || (Array.isArray(p.apiKeys) && p.apiKeys.some(Boolean))));
 }
 
+function routeAllowed(provider) {
+  if (provider?.authType !== 'oauth' || !provider.oauthProvider) return true;
+  const routing = require('./settings').get().providerRouting?.[String(provider.modelAuthProviderId || provider.oauthProvider)];
+  return routing?.oauthEnabled !== false;
+}
+
 // 计费网络时只保留本机 provider
 function localOnlyFilter(providers, localOnly) {
   const list = Array.isArray(providers) ? providers : [providers];
   return localOnly ? list.filter((p) => p.type === 'local') : list;
 }
 
-// 灾备：按数组顺序逐个尝试，全部失败抛最后一个错误
+function routeCandidates(list) {
+  const groups = new Map();
+  for (const provider of list) {
+    const id = String(provider.modelAuthProviderId || provider.oauthProvider || provider.source?.provider || provider.id || provider.name || 'default');
+    if (!groups.has(id)) groups.set(id, []);
+    groups.get(id).push(provider);
+  }
+  return [...groups.values()].flatMap((group) => {
+    if (group.length < 2) return group;
+    const strategy = group[0].routeStrategy || require('./settings').get().providerRouting?.[String(group[0].modelAuthProviderId || group[0].oauthProvider || group[0].source?.provider || group[0].id)]?.strategy || 'round-robin';
+    if (strategy === 'failover') return group;
+    const cursorKey = String(group[0].modelAuthProviderId || group[0].oauthProvider || group[0].source?.provider || group[0].id);
+    let ordered;
+    if (strategy === 'weighted-round-robin') {
+      ordered = group.flatMap((provider) => Array.from({ length: Math.max(1, Math.min(100, Number(provider.weight) || 1)) }, () => provider));
+    } else ordered = group;
+    const cursor = routeCursors.get(cursorKey) || 0;
+    routeCursors.set(cursorKey, (cursor + 1) % ordered.length);
+    const first = ordered[cursor % ordered.length];
+    return [first, ...group.filter((provider) => provider !== first)];
+  });
+}
+
+// 灾备：每个共享 provider 内按所选策略挑独立凭据；组间仍按用户配置顺序回退。
 async function withFailover(providers, fn) {
-  const list = (Array.isArray(providers) ? providers : [providers]).filter(usable);
+  const list = routeCandidates((Array.isArray(providers) ? providers : [providers]).filter((provider) => usable(provider) && routeAllowed(provider)));
   if (!list.length) throw new Error('没有可用的 provider（请在「设置 → 能力」选择 Provider Source、连接 OAuth 或配置自定义接口）');
   let lastErr;
   for (const p of list) {
@@ -446,6 +476,6 @@ const transcribeF = (providers, filePath) => withFailover(providers, (p) => tran
 module.exports = {
   chat, chatCompletion, chatJson, embed, transcribe, listModels,
   chatF, chatCompletionF, chatJsonF, embedF, transcribeF,
-  usable, withFailover, embeddingsConfigured, parseJsonLoose, localOnlyFilter, testProvider,
+  usable, routeAllowed, withFailover, routeCandidates, embeddingsConfigured, parseJsonLoose, localOnlyFilter, testProvider,
   TIMEOUTS, adapters, aggregateSseChatCompletion, // 导出供测试覆盖
 };

@@ -20,6 +20,7 @@ const DEFAULTS = {
       { name: '本机 Whisper 高精度', type: 'local', model: 'Xenova/whisper-small', keyless: true, enabled: false },
     ],
   },
+  providerRouting: {},
   // 全局归类习惯（cleanup 文件夹可单独覆盖）
   rules: '',
   destinations: [],
