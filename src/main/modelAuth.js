@@ -124,7 +124,10 @@ async function execute(action, { signal } = {}) {
       const session = trae.newSession();
       const result = await trae.login(session, signal);
       const cfg = settings.get();
-      settings.set({ providers: { chat: [...(cfg.providers.chat || []), { id: `trae-route:${session.id}`, name: result.sessionLabel || 'Trae Enterprise CLI', protocol: 'trae-cli', authType: 'trae-cli', credentialId: session.id, modelAuthProviderId: TRAE_PROVIDER_ID, traeHome: session.homeDir, model: '', weight: 1, enabled: true }] } });
+      const prior = (cfg.providers.chat || []).find((record) => routeId(record) === TRAE_PROVIDER_ID);
+      const chat = (cfg.providers.chat || []).filter((record) => routeId(record) !== TRAE_PROVIDER_ID);
+      chat.push({ id: `trae-route:${session.id}`, name: result.sessionLabel || 'Trae Enterprise CLI', protocol: 'trae-cli', authType: 'trae-cli', credentialId: session.id, modelAuthProviderId: TRAE_PROVIDER_ID, traeHome: session.homeDir, model: '', weight: prior?.weight || 1, enabled: prior?.enabled !== false });
+      settings.set({ providers: { chat } });
       return;
     }
     const definition = OAUTH_PROVIDERS.get(providerId);
