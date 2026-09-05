@@ -21,6 +21,7 @@ const DEFAULTS = {
     ],
   },
   providerRouting: {},
+  modelAuthSelection: null,
   // 全局归类习惯（cleanup 文件夹可单独覆盖）
   rules: '',
   destinations: [],
