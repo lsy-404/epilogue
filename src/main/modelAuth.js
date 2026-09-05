@@ -11,6 +11,7 @@ const OAUTH_PROVIDERS = new Map([
   ['oauth:workbuddy', { oauthProvider: 'workbuddy', name: 'WorkBuddy', catalogProviderId: 'workbuddy' }],
 ]);
 const TRAE_PROVIDER_ID = 'oauth:trae-enterprise';
+const TRAE_ACCOUNT_DEFAULT_MODEL = 'trae-account-default';
 const WORKBUDDY_RUNTIME_MODELS = new Set(['glm-5.2', 'glm-5.1', 'glm-5v-turbo', 'kimi-k2.7', 'minimax-m3-pay', 'hy3', 'deepseek-v4-pro', 'deepseek-v4-flash']);
 const WORKBUDDY_CATALOG_PROVIDERS = new Set(['zhipuai', 'deepseek', 'tencent-tokenhub']);
 
@@ -32,10 +33,12 @@ async function traeProvider(records) {
   const probe = await trae.status({ homeDir: trae.sessionHome('probe') });
   const statuses = await Promise.all(sessions.map(async (record) => ({ record, status: await trae.status({ homeDir: record.traeHome, label: record.name, host: record.traeHost }) })));
   const options = providerOptions(settings.get(), TRAE_PROVIDER_ID);
+  const authenticated = statuses.some(({ status }) => status.available === true && status.authenticated === true);
+  const models = probe.available === true && authenticated ? [TRAE_ACCOUNT_DEFAULT_MODEL] : [];
   return {
-    id: TRAE_PROVIDER_ID, name: 'Trae Enterprise CLI', description: probe.available ? 'Enterprise CLI session' : 'Enterprise CLI is not available on this device', authMethods: ['oauth'], available: probe.available === true,
-    unavailableReason: probe.available === true ? null : 'Trae Enterprise CLI is not installed or cannot be started.', oauthEnabled: options.oauthEnabled !== false, loadStrategy: options.strategy, models: [], oauthModels: [],
-    oauthCredentials: statuses.map(({ record, status }) => ({ id: credentialId(record), label: status.sessionLabel || record.name || 'Trae Enterprise CLI', healthy: status.authenticated === true, enabled: record.enabled !== false, weight: Number.isInteger(record.weight) ? record.weight : 1, models: [], cooldownUntilUtc: null })),
+    id: TRAE_PROVIDER_ID, name: 'Trae Enterprise CLI', description: probe.available ? '使用 CLI 中设置的账号默认模型；不是 models.dev 模型条目' : 'Enterprise CLI is not available on this device', authMethods: ['oauth'], available: probe.available === true,
+    unavailableReason: probe.available === true ? null : 'Trae Enterprise CLI is not installed or cannot be started.', oauthEnabled: options.oauthEnabled !== false, loadStrategy: options.strategy, models, oauthModels: models,
+    oauthCredentials: statuses.map(({ record, status }) => ({ id: credentialId(record), label: status.sessionLabel || record.name || 'Trae Enterprise CLI', healthy: status.authenticated === true, enabled: record.enabled !== false, weight: Number.isInteger(record.weight) ? record.weight : 1, models, cooldownUntilUtc: null })),
   };
 }
 function credentialId(provider) { return String(provider.credentialId || provider.oauthAccountId || provider.id || ''); }
@@ -121,12 +124,14 @@ async function execute(action, { signal } = {}) {
   if (action?.type === 'authorize-oauth') {
     if (providerId === TRAE_PROVIDER_ID) {
       const trae = require('./trae');
-      const session = trae.newSession();
+      const before = settings.get();
+      const prior = (before.providers.chat || []).find((record) => routeId(record) === TRAE_PROVIDER_ID);
+      const session = prior ? { id: credentialId(prior), homeDir: prior.traeHome, label: prior.name, host: prior.traeHost } : trae.newSession();
       const result = await trae.login(session, signal);
       const cfg = settings.get();
-      const prior = (cfg.providers.chat || []).find((record) => routeId(record) === TRAE_PROVIDER_ID);
+      const existing = (cfg.providers.chat || []).find((record) => routeId(record) === TRAE_PROVIDER_ID);
       const chat = (cfg.providers.chat || []).filter((record) => routeId(record) !== TRAE_PROVIDER_ID);
-      chat.push({ id: `trae-route:${session.id}`, name: result.sessionLabel || 'Trae Enterprise CLI', protocol: 'trae-cli', authType: 'trae-cli', credentialId: session.id, modelAuthProviderId: TRAE_PROVIDER_ID, traeHome: session.homeDir, model: '', weight: prior?.weight || 1, enabled: prior?.enabled !== false });
+      chat.push({ id: `trae-route:${session.id}`, name: result.sessionLabel || 'Trae Enterprise CLI', protocol: 'trae-cli', authType: 'trae-cli', credentialId: session.id, modelAuthProviderId: TRAE_PROVIDER_ID, traeHome: session.homeDir, model: TRAE_ACCOUNT_DEFAULT_MODEL, weight: existing?.weight || 1, enabled: existing?.enabled !== false });
       settings.set({ providers: { chat } });
       return;
     }

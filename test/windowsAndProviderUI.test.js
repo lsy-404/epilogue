@@ -29,6 +29,7 @@ test('chat Add opens the shared model-auth element through the trusted host', ()
   assert.match(preload, /modelAuthCancel/);
   assert.match(ipc, /model-auth:execute/);
   assert.match(ipc, /model-auth:cancel/);
+  assert.match(read('src/main/modelAuth.js'), /trae-account-default/);
 });
 
 test('file moves expose a persisted undo action through the trusted preload bridge', () => {

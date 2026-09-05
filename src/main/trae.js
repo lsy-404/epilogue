@@ -42,7 +42,7 @@ function promptFor(messages) {
 async function chatCompletion(record, messages, options = {}) {
   const provider = await providerFor({ homeDir: record.traeHome, label: record.name, host: record.traeHost });
   const tools = (options.tools || []).map((tool) => ({ name: tool.name, description: tool.description, inputSchema: tool.parameters || { type: 'object', properties: {} } }));
-  const result = await provider.execute({ prompt: promptFor(messages), ...(record.model ? { model: record.model } : {}), ...(tools.length ? { tools } : {}), ...(record.traeCwd ? { cwd: record.traeCwd } : {}), signal: options.signal });
+  const result = await provider.execute({ prompt: promptFor(messages), ...(record.model && record.model !== 'trae-account-default' ? { model: record.model } : {}), ...(tools.length ? { tools } : {}), ...(record.traeCwd ? { cwd: record.traeCwd } : {}), signal: options.signal });
   const toolCalls = (result?.toolCalls || []).map((call) => ({ id: String(call.id), name: String(call.toolName), arguments: JSON.parse(call.argumentsJson) }));
   const text = typeof result?.assistantText === 'string' ? result.assistantText : '';
   if (!text && !toolCalls.length) throw new Error('Trae enterprise CLI returned no structured result.');
