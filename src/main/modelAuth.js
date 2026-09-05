@@ -89,14 +89,14 @@ async function state() {
         return { id: account.id, label: account.label || oauthDefinition.name, account: account.accountId, healthy: true, enabled: record ? record.enabled !== false : false, weight: Number.isInteger(record?.weight) ? record.weight : 1, models, cooldownUntilUtc: null };
       }) } : {}) };
   });
-  const oauthProviders = [...OAUTH_PROVIDERS].filter(([id]) => !id.startsWith('catalog:')).map(([id, definition]) => {
+  const oauthProviders = [...OAUTH_PROVIDERS].filter(([id]) => !apiProviders.some(provider => provider.id === id)).map(([id, definition]) => {
     const options = providerOptions(cfg, id);
     const accounts = oauth.listAccounts(definition.oauthProvider);
     const linked = records.filter((record) => record.authType === 'oauth' && (routeId(record) === id || record.oauthProvider === definition.oauthProvider));
     const models = modelsForOauth(definition, listed);
     return {
-      id, name: definition.name, description: models.length ? 'Official OAuth' : 'No compatible models.dev runtime binding', authMethods: ['oauth'], available: models.length > 0,
-      unavailableReason: models.length ? null : 'No verified models.dev runtime binding is available.', oauthEnabled: options.oauthEnabled !== false, loadStrategy: options.strategy, models, oauthModels: models,
+      id, name: definition.name, description: models.length ? 'Official OAuth' : 'OAuth 可连接；模型目录暂不可用。', authMethods: ['oauth'], available: true,
+      unavailableReason: null, oauthEnabled: options.oauthEnabled !== false, loadStrategy: options.strategy, models, oauthModels: models,
       oauthCredentials: accounts.map((account) => {
         const record = linked.find((candidate) => credentialId(candidate) === account.id);
         return { id: account.id, label: account.label || definition.name, account: account.accountId, healthy: true,

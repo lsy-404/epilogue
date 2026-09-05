@@ -5,6 +5,7 @@
 // packages that can be represented by the adapters bundled in this app.
 const MODELS_DEV_URL = 'https://models.dev/api.json';
 const CATALOG_TTL_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_API_BASES = { openai: 'https://api.openai.com/v1', anthropic: 'https://api.anthropic.com/v1' };
 const SUPPORTED_PACKAGES = new Set([
   '@ai-sdk/openai-compatible',
   '@ai-sdk/openai',
@@ -39,7 +40,7 @@ function parseCatalog(value) {
       };
     }).filter((model) => model.id);
     if (!id || !packageName || !models.length) continue;
-    const baseUrl = typeof entry.api === 'string' ? entry.api.trim().replace(/\/+$/, '') : '';
+    const baseUrl = typeof entry.api === 'string' && entry.api.trim() ? entry.api.trim().replace(/\/+$/, '') : DEFAULT_API_BASES[id] || '';
     const protocol = protocolFor(id, packageName);
     const available = SUPPORTED_PACKAGES.has(packageName) && Boolean(baseUrl);
     providers.push({

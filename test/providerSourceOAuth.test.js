@@ -8,6 +8,19 @@ const path = require('path');
 const catalog = require('../src/main/providerCatalog');
 const oauth = require('../src/main/providerOAuth');
 
+test('built-in providers use their SDK default origins when models.dev omits api', () => {
+  const providers = catalog.parseCatalog({
+    openai: { npm: '@ai-sdk/openai', models: { 'model-one': {} } },
+    anthropic: { npm: '@ai-sdk/anthropic', models: { 'model-two': {} } },
+    custom: { npm: '@ai-sdk/openai-compatible', models: { 'model-three': {} } },
+  });
+  assert.equal(providers.find(provider => provider.id === 'openai').baseUrl, 'https://api.openai.com/v1');
+  assert.equal(providers.find(provider => provider.id === 'anthropic').baseUrl, 'https://api.anthropic.com/v1');
+  assert.equal(providers.find(provider => provider.id === 'openai').available, true);
+  assert.equal(providers.find(provider => provider.id === 'anthropic').available, true);
+  assert.equal(providers.find(provider => provider.id === 'custom').available, false);
+});
+
 test('Provider Source catalog exposes supported OpenCode entries and disables unbundled SDKs', () => {
   const providers = catalog.parseCatalog({
     compatible: {
@@ -70,7 +83,7 @@ test('WorkBuddy browser login polls for a renewable account credential', async (
         poll += 1;
         return new Response(JSON.stringify({ code: 0, data: { accessToken: 'access', refreshToken: 'refresh', expiresIn: 3600, domain: 'tenant' } }));
       }
-      return new Response(JSON.stringify({ code: 0, data: { uid: 'user-1', nickname: 'Rosmontis', enterpriseId: 'team-1' } }));
+      return new Response(JSON.stringify({ code: 0, data: { uid: 'user-1', nickname: 'Test Account', enterpriseId: 'team-1' } }));
     },
   });
   assert.equal(credential.access, 'access');

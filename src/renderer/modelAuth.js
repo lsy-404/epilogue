@@ -17,14 +17,24 @@ function actionFor(event) {
   return { type: event.type };
 }
 async function perform(event) {
+  if (dialog.busy) return;
   const operationId = crypto.randomUUID();
   activeOperation = operationId;
   dialog.busy = true;
+  dialog.error = null;
   try { await window.epologue.modelAuthExecute(actionFor(event), operationId); await refresh(); }
   catch { dialog.error = 'Operation could not be completed. Check the provider configuration and try again.'; }
   finally { if (activeOperation === operationId) activeOperation = null; dialog.busy = false; }
 }
-async function open() { dialog.open = true; dialog.error = null; await refresh(); }
+async function open() {
+  dialog.open = true;
+  if (dialog.busy) return;
+  dialog.busy = true;
+  dialog.error = null;
+  try { await refresh(); }
+  catch { dialog.error = 'Could not load model connections. Close this dialog and try again.'; }
+  finally { dialog.busy = false; }
+}
 window.openModelAuth = open;
 openButton?.addEventListener('click', open);
 dialog.addEventListener('close', () => {
