@@ -32,6 +32,16 @@ test('chat Add opens the shared model-auth element through the trusted host', ()
   assert.match(read('src/main/modelAuth.js'), /trae-account-default/);
 });
 
+test('the v0.2.2 native dialog stays mounted while the host controls its open state', () => {
+  const html = read('src/renderer/index.html');
+  const shared = read('src/renderer/modelAuth.js');
+  assert.match(html, /<model-auth-dialog><\/model-auth-dialog>/);
+  assert.match(shared, /const dialog = document\.querySelector\('model-auth-dialog'\)/);
+  assert.match(shared, /dialog\.open = true/);
+  assert.match(shared, /dialog\.open = false/);
+  assert.doesNotMatch(shared, /remove\(\)|removeChild\(|innerHTML\s*=/);
+});
+
 test('file moves expose a persisted undo action through the trusted preload bridge', () => {
   const html = read('src/renderer/index.html');
   const renderer = read('src/renderer/app.js');
