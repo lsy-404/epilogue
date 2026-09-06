@@ -32,7 +32,7 @@ test('chat Add opens the shared model-auth element through the trusted host', ()
   assert.match(read('src/main/modelAuth.js'), /trae-account-default/);
 });
 
-test('the v0.2.2 native dialog stays mounted while the host controls its open state', () => {
+test('the native dialog stays mounted while the host controls its open state', () => {
   const html = read('src/renderer/index.html');
   const shared = read('src/renderer/modelAuth.js');
   assert.match(html, /<model-auth-dialog><\/model-auth-dialog>/);
@@ -40,6 +40,16 @@ test('the v0.2.2 native dialog stays mounted while the host controls its open st
   assert.match(shared, /dialog\.open = true/);
   assert.match(shared, /dialog\.open = false/);
   assert.doesNotMatch(shared, /remove\(\)|removeChild\(|innerHTML\s*=/);
+});
+
+test('model selection closes only after a successful final action in the same dialog session', () => {
+  const shared = read('src/renderer/modelAuth.js');
+  assert.match(shared, /event\.type === 'select-model'/);
+  assert.match(shared, /await window\.epologue\.modelAuthExecute\(actionFor\(event\), operationId\);\s*await refresh\(\);/s);
+  assert.match(shared, /operationEpoch === dialogEpoch/);
+  assert.match(shared, /activeOperation === operationId/);
+  assert.match(shared, /dialog\.open = false/);
+  assert.doesNotMatch(shared, /confirmed/);
 });
 
 test('file moves expose a persisted undo action through the trusted preload bridge', () => {

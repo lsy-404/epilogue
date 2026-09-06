@@ -4,6 +4,7 @@ registerModelAuthElement();
 const dialog = document.querySelector('model-auth-dialog');
 const openButton = document.querySelector('#modelAuthOpen');
 let activeOperation = null;
+let dialogEpoch = 0;
 
 async function refresh() {
   const state = await window.epologue.modelAuthState();
@@ -19,14 +20,23 @@ function actionFor(event) {
 async function perform(event) {
   if (dialog.busy) return;
   const operationId = crypto.randomUUID();
+  const operationEpoch = dialogEpoch;
   activeOperation = operationId;
   dialog.busy = true;
   dialog.error = null;
-  try { await window.epologue.modelAuthExecute(actionFor(event), operationId); await refresh(); }
+  try {
+    await window.epologue.modelAuthExecute(actionFor(event), operationId);
+    await refresh();
+    if (event.type === 'select-model' && activeOperation === operationId && operationEpoch === dialogEpoch && dialog.open) {
+      activeOperation = null;
+      dialog.open = false;
+    }
+  }
   catch { dialog.error = 'Operation could not be completed. Check the provider configuration and try again.'; }
   finally { if (activeOperation === operationId) activeOperation = null; dialog.busy = false; }
 }
 async function open() {
+  dialogEpoch += 1;
   dialog.open = true;
   if (dialog.busy) return;
   dialog.busy = true;
@@ -38,6 +48,7 @@ async function open() {
 window.openModelAuth = open;
 openButton?.addEventListener('click', open);
 dialog.addEventListener('close', () => {
+  dialogEpoch += 1;
   if (activeOperation) void window.epologue.modelAuthCancel(activeOperation);
   dialog.open = false;
 });
