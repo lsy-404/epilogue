@@ -219,6 +219,31 @@ test('a synchronous postMessage failure clears pending work and still schedules 
   }
 });
 
+test('old host exit schedules reclaim after its pending request blocked a new host completion', async () => {
+  const clock = useFakeTimers();
+  const fixture = loadLocalModels();
+  try {
+    const oldRequest = fixture.localModels.embed(['old']);
+    const oldHost = fixture.hosts[0];
+    fixture.localModels.restartHost();
+
+    const newRequest = fixture.localModels.embed(['new']);
+    const newHost = fixture.hosts[1];
+    newHost.emit('message', { id: newHost.messages[0].id, ok: true, result: [[0.2]] });
+    await newRequest;
+    assert.equal(clock.timers.length, 0);
+
+    const oldFailure = assert.rejects(oldRequest, /模型进程已退出/);
+    oldHost.emit('exit');
+    await oldFailure;
+    clock.run(clock.timers[0]);
+    assert.equal(newHost.kills, 1);
+  } finally {
+    fixture.restore();
+    clock.restore();
+  }
+});
+
 test('an old host exit does not clear or reject a request sent to its replacement', async () => {
   const fixture = loadLocalModels();
   try {
