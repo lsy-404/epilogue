@@ -34,7 +34,7 @@ function useFakeTimers() {
   };
 }
 
-function loadLocalModels() {
+function loadLocalModels({ postMessage } = {}) {
   const hosts = [];
   const logs = [];
   const originalLoad = Module._load;
@@ -61,7 +61,7 @@ function loadLocalModels() {
             const host = new EventEmitter();
             host.messages = [];
             host.kills = 0;
-            host.postMessage = (message) => host.messages.push(message);
+            host.postMessage = postMessage || ((message) => host.messages.push(message));
             host.kill = () => { host.kills += 1; };
             hosts.push(host);
             return host;
@@ -181,14 +181,36 @@ test('only model-host environment setting changes restart the host', async () =>
   }
 });
 
-test('a later tray task is also reclaimed after the quiet period', async () => {
+test('tray intent reclaims a later task after the first task was already reclaimed', async () => {
   const clock = useFakeTimers();
   const fixture = loadLocalModels();
   try {
-    const request = fixture.localModels.embed(['later']);
+    const first = fixture.localModels.embed(['first']);
+    const firstHost = fixture.hosts[0];
+    firstHost.emit('message', { id: firstHost.messages[0].id, ok: true, result: [[0.1]] });
+    await first;
+    clock.run(clock.timers[0]);
+    assert.equal(firstHost.kills, 1);
+
+    const second = fixture.localModels.embed(['second']);
+    const secondHost = fixture.hosts[1];
+    secondHost.emit('message', { id: secondHost.messages[0].id, ok: true, result: [[0.2]] });
+    await second;
+    clock.run(clock.timers[1]);
+    assert.equal(secondHost.kills, 1);
+  } finally {
+    fixture.restore();
+    clock.restore();
+  }
+});
+
+test('a synchronous postMessage failure clears pending work and still schedules idle reclaim', async () => {
+  const clock = useFakeTimers();
+  const fixture = loadLocalModels({ postMessage: () => { throw new Error('host unavailable'); } });
+  try {
+    await assert.rejects(fixture.localModels.embed(['document']), /host unavailable/);
     const host = fixture.hosts[0];
-    host.emit('message', { id: host.messages[0].id, ok: true, result: [[0.1]] });
-    await request;
+    assert.equal(clock.timers[0].delay, 5000);
     clock.run(clock.timers[0]);
     assert.equal(host.kills, 1);
   } finally {

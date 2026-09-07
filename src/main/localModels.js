@@ -36,7 +36,6 @@ function scheduleIdleShutdown() {
   shutdownTimer = setTimeout(() => {
     shutdownTimer = null;
     if (shutdownWhenIdle && pending.size === 0) {
-      shutdownWhenIdle = false;
       restartHost();
       require('./log').log('models', 'host shut down (tray idle)');
     }
@@ -92,7 +91,13 @@ function call(op, ...args) {
     clearShutdownTimer();
     const host = ensureChild();
     pending.set(id, { resolve, reject, host });
-    host.postMessage({ id, op, args });
+    try {
+      host.postMessage({ id, op, args });
+    } catch (error) {
+      pending.delete(id);
+      reject(error);
+      scheduleIdleShutdown();
+    }
   });
 }
 
