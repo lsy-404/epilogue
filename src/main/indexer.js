@@ -135,11 +135,6 @@ function* walkFiles(dir, recursive) {
   }
 }
 
-function listFiles(dir, recursive, acc = []) {
-  for (const file of walkFiles(dir, recursive)) acc.push(file);
-  return acc;
-}
-
 // 让出一拍事件循环：提取含同步重操作（adm-zip 等），让步保证进度 IPC 先投递到渲染层再开始干活
 const yieldLoop = () => new Promise((r) => setImmediate(r));
 
@@ -207,4 +202,4 @@ async function indexDestinations(store, { onProgress = () => {}, limit = 50 } = 
   return results;
 }
 
-module.exports = { indexFile, indexFolder, indexDestinations, listFiles, walkFiles, yieldLoop, localMeta };
+module.exports = { indexFile, indexFolder, indexDestinations, walkFiles, yieldLoop, localMeta };
