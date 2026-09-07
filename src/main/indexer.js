@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const llm = require('./llm');
 const settings = require('./settings');
-const { kindOf } = require('./extractors'); // extract 本体在 modelHost 子进程执行（032）
+const { kindOf } = require('./extractors'); // extract 本体在 modelHost 子进程执行
 const { transcribeMedia } = require('./media');
 
 const SKIP_DIRS = new Set(['node_modules', '.git', '.Trash', 'Library', '$RECYCLE.BIN', 'System Volume Information']);
@@ -62,7 +62,7 @@ async function indexFile(filePath, store, onProgress = () => {}, { manual = fals
     content = transcript.slice(0, cfg.extraction.maxChars);
   } else {
     onProgress({ file: fileName, stage: '提取内容…' });
-    // 提取在 modelHost 子进程执行（nice 19、崩溃隔离），主进程事件循环不被同步解析阻塞
+    // 提取在 modelHost 子进程执行，主进程事件循环不被同步解析阻塞
     const localModels = require('./localModels');
     content = (await localModels.extractRemote(filePath, cfg.extraction)).content;
   }
@@ -123,40 +123,40 @@ async function indexFile(filePath, store, onProgress = () => {}, { manual = fals
   return record;
 }
 
-function listFiles(dir, recursive, acc = []) {
+function* walkFiles(dir, recursive) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     if (entry.name.startsWith('.') || SKIP_DIRS.has(entry.name)) continue;
     const p = path.join(dir, entry.name);
     if (entry.isDirectory()) {
-      if (recursive) listFiles(p, recursive, acc);
+      if (recursive) yield* walkFiles(p, recursive);
     } else if (entry.isFile()) {
-      acc.push(p);
+      yield p;
     }
   }
-  return acc;
 }
 
 // 让出一拍事件循环：提取含同步重操作（adm-zip 等），让步保证进度 IPC 先投递到渲染层再开始干活
 const yieldLoop = () => new Promise((r) => setImmediate(r));
 
 async function indexFolder(dir, store, { recursive = true, onProgress = () => {}, manual = false } = {}) {
-  const files = listFiles(dir, recursive);
   const results = { ok: 0, failed: 0, errors: [] };
-  for (let i = 0; i < files.length; i++) {
-    onProgress({ current: i + 1, total: files.length, file: path.basename(files[i]) });
+  let current = 0;
+  for (const file of walkFiles(dir, recursive)) {
+    current++;
+    onProgress({ current, file: path.basename(file) });
     await yieldLoop();
     try {
-      await indexFile(files[i], store, (p) => onProgress({ current: i + 1, total: files.length, ...p }), { manual });
+      await indexFile(file, store, (p) => onProgress({ current, ...p }), { manual });
       results.ok++;
     } catch (e) {
       results.failed++;
-      results.errors.push({ file: files[i], error: e.message });
+      results.errors.push({ file, error: e.message });
     }
   }
   return results;
 }
 
-// 增量索引：归类目标 ∪ 清理来源文件夹（未归档文件提前入索引——寻物可覆盖，归类免现场索引开销）。
+// 增量索引：归类目标 ∪ 清理来源文件夹（未归档文件提前入索引，寻物可覆盖，归类免现场索引开销）。
 // 文件名必索；内容/云内容按 perFolder 路径配置（来源未配置默认全文）。每轮限额防独占。
 async function indexDestinations(store, { onProgress = () => {}, limit = 50 } = {}) {
   const { log } = require('./log');
@@ -174,34 +174,32 @@ async function indexDestinations(store, { onProgress = () => {}, limit = 50 } = 
     const pf = perFolder[dest] || {};
     const contentAllowed = pf.content !== false; // 内容索引按目标文件夹单独控制（缺省开）
     const cloudAllowed = pf.cloud === true; // 云同步文件内容索引按文件夹单独控制（缺省关）
-    let files = [];
     try {
-      files = listFiles(dest, true);
+      for (const f of walkFiles(dest, true)) {
+        if (budget <= 0) {
+          log('destIndex', 'budget exhausted, resuming next pass', results);
+          return results;
+        }
+        const wantFull = contentAllowed && (!isCloud(f) || cloudAllowed);
+        const existing = store.get(f);
+        // 已满足（或无需升级）跳过；超大文件永远只能 name 索引，不反复尝试升级
+        if (existing && !(existing.indexedMode === 'name' && wantFull && existing.sizeBytes <= MAX_FILE_SIZE)) continue;
+        budget--;
+        try {
+          await indexFile(f, store, onProgress, { nameOnly: !wantFull });
+          results.ok++;
+        } catch (e) {
+          results.failed++;
+          log('destIndex', `failed: ${path.basename(f)}`, { error: String(e.message || e).slice(0, 120) });
+        }
+        await yieldLoop();
+      }
     } catch {
       continue; // 目标不存在/无权限，跳过
-    }
-    for (const f of files) {
-      if (budget <= 0) {
-        log('destIndex', 'budget exhausted, resuming next pass', results);
-        return results;
-      }
-      const wantFull = contentAllowed && (!isCloud(f) || cloudAllowed);
-      const existing = store.get(f);
-      // 已满足（或无需升级）跳过；超大文件永远只能 name 索引，不反复尝试升级
-      if (existing && !(existing.indexedMode === 'name' && wantFull && existing.sizeBytes <= MAX_FILE_SIZE)) continue;
-      budget--;
-      try {
-        await indexFile(f, store, onProgress, { nameOnly: !wantFull });
-        results.ok++;
-      } catch (e) {
-        results.failed++;
-        log('destIndex', `failed: ${path.basename(f)}`, { error: String(e.message || e).slice(0, 120) });
-      }
-      await yieldLoop();
     }
   }
   if (results.ok || results.failed) log('destIndex', 'pass done', results);
   return results;
 }
 
-module.exports = { indexFile, indexFolder, indexDestinations, listFiles, yieldLoop, localMeta };
+module.exports = { indexFile, indexFolder, indexDestinations, walkFiles, yieldLoop, localMeta };
