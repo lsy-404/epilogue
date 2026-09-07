@@ -41,32 +41,33 @@ function notifyFound(found, cfg) {
 // Solo 模式：索引缺失记录 → AI 建议 → 自动执行移动/回收站（无需审批，仅定时触发时走此路径）
 async function soloProcess(found) {
   const { log } = require('./log');
-  const store = require('./ipc').getStore();
   const indexer = require('./indexer');
   const classifier = require('./classifier');
-  const records = [];
-  for (const f of found) {
-    let r = store.get(f.filePath);
-    if (!r) {
-      try {
-        r = await indexer.indexFile(f.filePath, store); // manual:false —— 沿用电池暂缓等后台约束
-      } catch (e) {
-        log('solo', `index failed: ${f.fileName}`, { error: String(e.message || e).slice(0, 120) });
-        continue;
+  return require('./ipc').withStore(async (store) => {
+    const records = [];
+    for (const f of found) {
+      let r = store.get(f.filePath);
+      if (!r) {
+        try {
+          r = await indexer.indexFile(f.filePath, store); // manual:false —— 沿用电池暂缓等后台约束
+        } catch (e) {
+          log('solo', `index failed: ${f.fileName}`, { error: String(e.message || e).slice(0, 120) });
+          continue;
+        }
       }
+      records.push({ ...r, rulesOverride: f.rulesOverride || null });
     }
-    records.push({ ...r, rulesOverride: f.rulesOverride || null });
-  }
-  if (!records.length) return 0;
-  const suggestions = await classifier.suggest(records);
-  const moves = suggestions
-    .filter((s) => s.trash === true || (s.move !== false && s.destination))
-    .map((s) => ({ filePath: s.filePath, destination: s.destination, subfolder: s.subfolder || '', trash: s.trash === true }));
-  if (!moves.length) return 0;
-  const results = await classifier.applyMoves(moves, store, { source: 'solo' });
-  const ok = results.filter((r) => r.newPath || r.trashed).length;
-  log('solo', `auto-filed ${ok}/${moves.length}`, { trashed: results.filter((r) => r.trashed).length });
-  return ok;
+    if (!records.length) return 0;
+    const suggestions = await classifier.suggest(records);
+    const moves = suggestions
+      .filter((s) => s.trash === true || (s.move !== false && s.destination))
+      .map((s) => ({ filePath: s.filePath, destination: s.destination, subfolder: s.subfolder || '', trash: s.trash === true }));
+    if (!moves.length) return 0;
+    const results = await classifier.applyMoves(moves, store, { source: 'solo' });
+    const ok = results.filter((r) => r.newPath || r.trashed).length;
+    log('solo', `auto-filed ${ok}/${moves.length}`, { trashed: results.filter((r) => r.trashed).length });
+    return ok;
+  });
 }
 
 function tick(auto = false) {
@@ -75,8 +76,7 @@ function tick(auto = false) {
   // 归类目标额外索引：定时顺带跑一轮（限额内增量），失败只记日志
   if (auto && cfg.destIndex?.enabled) {
     const indexer = require('./indexer');
-    indexer
-      .indexDestinations(require('./ipc').getStore())
+    require('./ipc').withStore((store) => indexer.indexDestinations(store))
       .catch((e) => require('./log').log('destIndex', 'pass failed', { error: String(e.message || e).slice(0, 160) }));
   }
   const found = stale.scanCleanup(cfg);
