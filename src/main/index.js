@@ -37,6 +37,7 @@ if (!app.requestSingleInstanceLock()) {
 
 // 托盘常驻模式下不预载 UI：窗口只在打开时创建，关闭即销毁，渲染进程内存随之释放
 function openWindow(view) {
+  ipc.resumeStore();
   require('./localModels').cancelIdleShutdown();
   if (process.platform === 'darwin') app.dock?.show(); // 托盘态隐藏的 Dock 随窗口恢复
   if (win && !win.isDestroyed()) {
