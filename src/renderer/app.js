@@ -9,7 +9,6 @@ const fmtSize = (n) => (n > 1 << 30 ? (n / (1 << 30)).toFixed(1) + ' GB' : n > 1
 if (navigator.platform.toLowerCase().includes('mac')) document.body.classList.add('darwin');
 
 let currentSettings = null;
-let libraryCache = [];
 let staleFiles = [];
 let suggestions = [];
 let t = window.EpilogueI18n.makeT('zh');
@@ -157,7 +156,7 @@ function applyI18n() {
   const lang = currentSettings?.language || 'zh';
   t = window.EpilogueI18n.makeT(lang);
   document.documentElement.lang = lang;
-  document.body.classList.toggle('lang-en', lang === 'en'); // 英文界面隐藏中文副标题（050）
+  document.body.classList.toggle('lang-en', lang === 'en'); // 英文界面隐藏中文副标题
   for (const el of document.querySelectorAll('[data-i18n]')) el.textContent = t(el.dataset.i18n);
   for (const el of document.querySelectorAll('[data-i18n-ph]')) el.placeholder = t(el.dataset.i18nPh);
   for (const el of document.querySelectorAll('[data-i18n-html]')) el.innerHTML = t(el.dataset.i18nHtml);
@@ -170,7 +169,7 @@ function switchView(view) {
   document.querySelectorAll('.view').forEach((v) => v.classList.toggle('active', v.id === `view-${view}`));
   if (view === 'dashboard') refreshDashboard();
   if (view === 'ask') refreshLibrary(); // 索引库已并入寻物
-  if (view === 'settings') renderStorage(); // 存储统计惰性加载（042：启动即遍历安装目录曾致主进程内存膨胀）
+  if (view === 'settings') renderStorage(); // 存储统计惰性加载
 }
 for (const btn of document.querySelectorAll('.nav-item')) {
   btn.addEventListener('click', () => switchView(btn.dataset.view));
@@ -260,58 +259,57 @@ api.onIndexProgress((p) => {
 });
 
 /* ---------- 索引库（含日期滑条筛选） ---------- */
-let dateRange = { min: 0, max: Date.now() };
+const LIB_PAGE = 400;
+let libraryShown = 0;
+let libraryRequest = 0;
+let libraryLoading = false;
 
-async function refreshLibrary() {
-  libraryCache = await api.storeList();
-  const times = libraryCache.map((r) => r.fileMtime || Date.parse(r.indexedAt) || Date.now());
-  dateRange.min = times.length ? Math.min(...times) : 0;
-  dateRange.max = times.length ? Math.max(...times) : Date.now();
-  renderLibrary();
-}
-
-function sliderToTime(v) {
-  return dateRange.min + ((dateRange.max - dateRange.min) * v) / 100;
+function refreshLibrary() {
+  clearTimeout(libFilterTimer);
+  libraryRequest++;
+  if (!$('#view-ask').classList.contains('active')) return;
+  return renderLibrary();
 }
 
 function fmtDate(ms) {
   return new Date(ms).toISOString().slice(0, 10);
 }
 
-const LIB_PAGE = 400; // 大库渲染上限：首批 400 行，点击「显示更多」翻页式追加
-let libraryLimit = LIB_PAGE;
-
-function renderLibrary() {
-  const q = $('#libraryFilter').value.trim().toLowerCase();
-  let from = sliderToTime(+$('#dateFrom').value);
-  let to = sliderToTime(+$('#dateTo').value);
-  if (from > to) [from, to] = [to, from];
-  $('#dateFromLabel').textContent = libraryCache.length ? fmtDate(from) : '—';
-  $('#dateToLabel').textContent = libraryCache.length ? fmtDate(to) : '—';
-
-  const rows = libraryCache.filter((r) => {
-    const tm = r.fileMtime || Date.parse(r.indexedAt) || 0;
-    if (tm < from - 86400000 || tm > to + 86400000) return false;
-    return !q || r.fileName.toLowerCase().includes(q) || (r.summary || '').toLowerCase().includes(q) || (r.keywords || []).join(' ').toLowerCase().includes(q);
-  });
-  const shown = rows.slice(0, libraryLimit);
-  const more = rows.length - shown.length;
-  $('#libraryList').innerHTML =
-    (shown
-      .map((r) =>
-        fileItem(
-          r,
-          `${r.hasVector ? '<span class="badge ok">vec</span>' : ''}<button class="link-btn danger" data-remove="${esc(r.filePath)}">${t('remove')}</button>`
-        )
-      )
-      .join('') || `<li class="empty">${t('lib_empty')}</li>`) +
-    (more > 0 ? `<li class="empty"><button class="link-btn" id="btnLibMore">${t('lib_more', { n: more })}</button></li>` : '');
+async function renderLibrary(append = false) {
+  if (append && libraryLoading) return;
+  const request = ++libraryRequest;
+  libraryLoading = true;
+  try {
+    const page = await api.storeList({
+      query: $('#libraryFilter').value,
+      from: +$('#dateFrom').value, to: +$('#dateTo').value,
+      offset: append ? libraryShown : 0, limit: LIB_PAGE,
+    });
+    if (request !== libraryRequest) return;
+    $('#dateFromLabel').textContent = page.recordsTotal ? fmtDate(page.from) : '—';
+    $('#dateToLabel').textContent = page.recordsTotal ? fmtDate(page.to) : '—';
+    const list = $('#libraryList');
+    if (!append) { list.replaceChildren(); libraryShown = 0; }
+    $('#btnLibMore')?.closest('li').remove();
+    list.insertAdjacentHTML('beforeend', page.rows.map((r) => fileItem(r,
+      `${r.hasVector ? '<span class="badge ok">vec</span>' : ''}<button class="link-btn danger" data-remove="${esc(r.filePath)}">${t('remove')}</button>`
+    )).join(''));
+    libraryShown += page.rows.length;
+    const more = page.total - libraryShown;
+    if (!libraryShown) list.innerHTML = `<li class="empty">${t('lib_empty')}</li>`;
+    if (more > 0) list.insertAdjacentHTML('beforeend', `<li class="empty"><button class="link-btn" id="btnLibMore">${t('lib_more', { n: more })}</button></li>`);
+  } catch (error) {
+    if (request === libraryRequest && !append) $('#libraryList').innerHTML = `<li class="empty err">${esc(t('err', { msg: error.message }))}</li>`;
+  } finally {
+    if (request === libraryRequest) libraryLoading = false;
+  }
 }
 
 // 筛选防抖：每击键全量重建 DOM 在大库下卡顿
 let libFilterTimer = null;
 function renderLibraryDebounced() {
-  libraryLimit = LIB_PAGE; // 条件变化重置翻页
+  libraryRequest++;
+  libraryLoading = true;
   clearTimeout(libFilterTimer);
   libFilterTimer = setTimeout(renderLibrary, 120);
 }
@@ -320,8 +318,7 @@ $('#dateFrom').addEventListener('input', renderLibraryDebounced);
 $('#dateTo').addEventListener('input', renderLibraryDebounced);
 $('#libraryList').addEventListener('click', async (e) => {
   if (e.target.closest('#btnLibMore')) {
-    libraryLimit += LIB_PAGE;
-    renderLibrary();
+    renderLibrary(true);
     return;
   }
   const rm = e.target.closest('[data-remove]');
@@ -1556,9 +1553,9 @@ $('#view-settings').addEventListener('input', (e) => {
 // 清理页配置区即存
 $('#rulesInput').addEventListener('input', () => scheduleAutoSave('cleanup'));
 
-/* ---------- ToS（首次启动 + 设置-关于内随时查看，051：纯文本 TERMS.txt 全文零渲染） ---------- */
+/* ---------- ToS（首次启动 + 设置-关于内随时查看） ---------- */
 async function loadDoc(name) {
-  $('#docTitle').textContent = t(name === 'terms' ? 'tos_title' : 'license_title'); // 浮层标题随内容（050）
+  $('#docTitle').textContent = t(name === 'terms' ? 'tos_title' : 'license_title'); // 浮层标题随内容
   $('#docText').textContent = await api.appDoc(name);
   document.querySelector('#tosOverlay .tos-body').scrollTop = 0;
 }
@@ -1573,7 +1570,7 @@ async function maybeShowTos() {
   $('#tosDecline').addEventListener('click', () => window.close());
 }
 
-/* ---------- 关于（047，对齐 ../IRIS：logo + 版本 + ToS 内置查看） ---------- */
+/* ---------- 关于 ---------- */
 api.appVersion().then((v) => {
   $('#aboutVersion').textContent = `v${v.version} · Electron ${v.electron}`;
 });

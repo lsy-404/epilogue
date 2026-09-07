@@ -11,7 +11,7 @@ contextBridge.exposeInMainWorld('epologue', {
   indexDestinations: () => ipcRenderer.invoke('dest:index'),
   indexFiles: (paths) => ipcRenderer.invoke('index:files', paths),
   storeStats: () => ipcRenderer.invoke('store:stats'),
-  storeList: () => ipcRenderer.invoke('store:list'),
+  storeList: (options) => ipcRenderer.invoke('store:list', options),
   storeRecent: (n) => ipcRenderer.invoke('store:recent', n),
   assistantChat: (history) => ipcRenderer.invoke('assistant:chat', history),
   assistantResolveApproval: (id, approved) => ipcRenderer.invoke('assistant:approval', id, approved),

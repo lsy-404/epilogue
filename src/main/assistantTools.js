@@ -74,7 +74,7 @@ async function executeReadTool(tool, args, events) {
   if (tool === 'get_status') {
     const ipc = require('./ipc');
     events.push({ type: 'status_read', detail: '' });
-    return { tool, ok: true, stats: ipc.getStore().stats(), settings: settingsDigest(settings.get()) };
+    return ipc.withStore((store) => ({ tool, ok: true, stats: store.stats(), settings: settingsDigest(settings.get()) }));
   }
   return { tool, ok: false, error: 'unknown or mutating tool' };
 }

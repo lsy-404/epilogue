@@ -1,6 +1,5 @@
 'use strict';
-// 所有 IPC handler 注册。重模块（llm/vectorstore/indexer/classifier/stale）handler 内 lazy require ——
-// 托盘静默启动不加载（044 轻量化）。
+// 重模块在 handler 内按需加载，减少托盘启动开销。
 const { ipcMain, dialog, shell, app, clipboard } = require('electron');
 const path = require('path');
 const settings = require('./settings');
@@ -14,6 +13,8 @@ const lazy = {
 };
 
 let store;
+let storeUsers = 0;
+let unloadRequested = true;
 const modelAuthOperations = new Map();
 
 function getStore() {
@@ -24,18 +25,36 @@ function getStore() {
   return store;
 }
 
-// 托盘驻留不持数据（044）：窗口关闭时落盘并卸载，GUI 重开 / 定时任务到点经 getStore() 惰性重建
+// 托盘驻留不持数据：窗口关闭时落盘并卸载，GUI 重开 / 定时任务到点经 getStore() 惰性重建
 function unloadStore() {
-  if (!store) return;
+  unloadRequested = true;
+  if (storeUsers || !store) return;
   store.flush();
   require('./log').log('app', 'store unloaded (tray idle)', { records: store.stats().total });
   store = null;
 }
 
+function resumeStore() {
+  unloadRequested = false;
+}
+
+async function withStore(operation) {
+  storeUsers++;
+  try {
+    return await operation(getStore());
+  } finally {
+    storeUsers--;
+    if (unloadRequested) unloadStore();
+  }
+}
+
 // 寻物三模式：keyword 纯关键字 / match embedding 匹配度（只出命中与分数）/ ai 检索 + LLM 总结
-async function ask(question, mode = 'ai') {
+function ask(question, mode = 'ai') {
+  return withStore((s) => search(s, question, mode));
+}
+
+async function search(s, question, mode) {
   const cfg = settings.get();
-  const s = getStore();
   const network = require('./network');
   // 计费网络时只用本机 embedding
   const embProviders = lazy.llm.localOnlyFilter(cfg.providers.embeddings, cfg.app.avoidCloudOnMetered && network.isMetered());
@@ -116,6 +135,8 @@ function register(getWindow, hooks = {}) {
       if (!isTrustedIpcEvent(event, getWindow)) throw new Error('Rejected untrusted IPC sender');
       return listener(event, ...args);
     });
+  const handleStore = (channel, listener) =>
+    handle(channel, (...args) => withStore((s) => listener(s, ...args)));
 
   handle('settings:get', () => settings.get());
   handle('settings:set', (_e, patch) => {
@@ -144,10 +165,10 @@ function register(getWindow, hooks = {}) {
     return r.canceled ? [] : r.filePaths;
   });
 
-  handle('index:folder', (_e, dir, recursive) =>
-    lazy.indexer.indexFolder(dir, getStore(), { recursive, onProgress: progress('index:progress'), manual: true })
+  handleStore('index:folder', (s, _e, dir, recursive) =>
+    lazy.indexer.indexFolder(dir, s, { recursive, onProgress: progress('index:progress'), manual: true })
   );
-  handle('index:files', async (_e, filePaths) => {
+  handleStore('index:files', async (s, _e, filePaths) => {
     const results = { ok: 0, failed: 0, errors: [] };
     for (let i = 0; i < filePaths.length; i++) {
       progress('index:progress')({ current: i + 1, total: filePaths.length, file: path.basename(filePaths[i]) });
@@ -155,7 +176,7 @@ function register(getWindow, hooks = {}) {
       try {
         await lazy.indexer.indexFile(
           filePaths[i],
-          getStore(),
+          s,
           (p) => progress('index:progress')({ current: i + 1, total: filePaths.length, ...p }),
           { manual: true }
         );
@@ -168,26 +189,17 @@ function register(getWindow, hooks = {}) {
     return results;
   });
 
-  handle('store:stats', () => getStore().stats());
-  // 列表瘦身：vector / transcriptPreview 渲染层用不到，不进 IPC
-  const { hasVec } = require('./vectorstore');
-  handle('store:list', () =>
-    getStore().all().map((r) => ({ ...r, vector: undefined, transcriptPreview: undefined, hasVector: hasVec(r) }))
-  );
-  // 总览「最近索引」专用：主进程排序+切片，避免全量传输
-  handle('store:recent', (_e, n = 8) =>
-    [...getStore().all()]
-      .sort((a, b) => (b.indexedAt || '').localeCompare(a.indexedAt || ''))
-      .slice(0, n)
-      .map((r) => ({ filePath: r.filePath, fileName: r.fileName, kind: r.kind, summary: r.summary }))
-  );
-  handle('store:remove', (_e, filePath) => getStore().remove(filePath));
+  handleStore('store:stats', (s) => s.stats());
+  const { queryLibrary, recentRecords } = require('./libraryQuery');
+  handleStore('store:list', (s, _e, options) => queryLibrary(s.all(), options));
+  handleStore('store:recent', (s, _e, n) => recentRecords(s.all(), n));
+  handleStore('store:remove', (s, _e, filePath) => s.remove(filePath));
 
   handle('search:ask', (_e, question, mode) => ask(question, mode));
 
   // 手动触发归类目标额外索引（跑完为止，不设上限；定时 pass 仍限 50/轮）
-  handle('dest:index', () =>
-    lazy.indexer.indexDestinations(getStore(), { onProgress: progress('index:progress'), limit: Number.MAX_SAFE_INTEGER })
+  handleStore('dest:index', (s) =>
+    lazy.indexer.indexDestinations(s, { onProgress: progress('index:progress'), limit: Number.MAX_SAFE_INTEGER })
   );
 
   // 内置助手对话（history: [{role, content}]）
@@ -231,8 +243,7 @@ function register(getWindow, hooks = {}) {
   });
 
   // items: 字符串路径 或 {filePath, rules}（cleanup 文件夹的单独规则）
-  handle('classify:suggest', async (_e, items) => {
-    const s = getStore();
+  handleStore('classify:suggest', async (s, _e, items) => {
     const norm = items.map((i) => (typeof i === 'string' ? { filePath: i } : i));
     const records = [];
     const failed = []; // 单文件索引失败不阻塞整批：以「无目标+原因」行返回
@@ -260,9 +271,9 @@ function register(getWindow, hooks = {}) {
     const out = records.length ? await lazy.classifier.suggest(records, (p) => progress('index:progress')(p)) : [];
     return [...out, ...failed];
   });
-  handle('classify:apply', (_e, moves) => lazy.classifier.applyMoves(moves, getStore()));
-  handle('classify:undoLatest', (_e, transactionId) =>
-    lazy.classifier.undoMoves(transactionId, getStore())
+  handleStore('classify:apply', (s, _e, moves) => lazy.classifier.applyMoves(moves, s));
+  handleStore('classify:undoLatest', (s, _e, transactionId) =>
+    lazy.classifier.undoMoves(transactionId, s)
   );
   handle('classify:undoStatus', () => lazy.classifier.latestUndoable());
 
@@ -349,10 +360,10 @@ function register(getWindow, hooks = {}) {
   handle('shell:reveal', (_e, p) => shell.showItemInFolder(p));
   handle('clipboard:write', (_e, value) => clipboard.writeText(String(value || '')));
 
-  // 关于页：版本信息（047，对齐 ../IRIS 方案）
+  // 关于页：版本信息
   handle('app:version', () => ({ version: app.getVersion(), electron: process.versions.electron }));
 
-  // 内置文档（048：打包后用户无项目文件，条款/许可证全文随包内置查看；051：条款为纯文本零渲染）
+  // 内置文档
   const DOCS = { terms: 'TERMS.txt', license: 'LICENSE' };
   handle('app:doc', (_e, name) => {
     const file = DOCS[name];
@@ -381,8 +392,7 @@ function register(getWindow, hooks = {}) {
     }
     return total;
   }
-  handle('storage:stats', () => {
-    const s = getStore();
+  handleStore('storage:stats', (s) => {
     const userData = app.getPath('userData');
     let indexBytes = 0;
     for (const f of ['index.json', 'vectors.bin']) {
@@ -393,7 +403,7 @@ function register(getWindow, hooks = {}) {
       }
     }
     // 应用本体：打包后取安装目录（mac 为 .app 根）；开发模式不遍历 node_modules，标记 dev。
-    // 安装目录数万文件、同步遍历昂贵且运行期不变 —— 模块级缓存只算一次（042：启动期重复遍历曾把主进程堆顶到上限）
+    // 安装目录数万文件、同步遍历昂贵且运行期不变 —— 模块级缓存只算一次
     let appBytes = null;
     if (app.isPackaged) {
       if (register.appBytesCache === undefined) {
@@ -410,9 +420,9 @@ function register(getWindow, hooks = {}) {
     };
   });
   // 按文件类型清理索引记录（不动原文件，重新索引可恢复）
-  handle('storage:cleanKind', (_e, kind) => {
-    const removed = getStore().removeKind(String(kind));
-    getStore().flush();
+  handleStore('storage:cleanKind', (s, _e, kind) => {
+    const removed = s.removeKind(String(kind));
+    s.flush();
     require('./log').log('app', `index records cleaned by kind: ${kind}`, { removed });
     return removed;
   });
@@ -423,5 +433,5 @@ function register(getWindow, hooks = {}) {
   });
 }
 
-// ask/getStore 供 assistant 复用；flushStore 供退出前落盘（向量库写盘已防抖）；unloadStore 托盘卸载（044）
-module.exports = { register, ask, getStore, unloadStore, flushStore: () => store?.flush() };
+// ask/getStore 供 assistant 复用；flushStore 供退出前落盘（向量库写盘已防抖）；unloadStore 托盘卸载
+module.exports = { register, ask, getStore, withStore, resumeStore, unloadStore, flushStore: () => store?.flush() };
