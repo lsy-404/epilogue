@@ -9,4 +9,4 @@
 | 001 | [Feature]_shared-model-auth | 以共享 model-auth 接口替换旧 provider onboarding，并使账户池与推理设置真实联动 | 统一 provider 授权和模型选择体验 | 🔄 进行中 |
 | 002 | [Feature]_trae-enterprise-cli | 接入已验证的企业版 Trae CLI adapter，并隔离每个应用和凭据的 CLI home | 只展示可真实验证的企业 CLI 能力 | ⏳ 待处理 |
 | 003 | [Maintenance]_model-auth-v0.2.2-dialog | 同步共享 model-auth v0.2.5 确认按钮动画时序补丁，保留宿主关闭生命周期保护 | 消费正式归档并完成全套回归 | ✅ 已完成 |
-| 058 | [Performance]_降低运行与索引开销 | 并行优化向量、扫描、模型回收和 IPC 分页并实测 | 用户要求性能与开销优化 | 🔄 进行中 |
+| 058 | [Performance]_降低运行与索引开销 | 并行优化向量、扫描、模型回收和 IPC 分页并实测 | 用户要求性能与开销优化 | ✅ 已完成 |
