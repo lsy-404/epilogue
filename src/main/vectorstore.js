@@ -12,6 +12,7 @@ const zlib = require('zlib');
 
 const VEC_PREFIX = 'f32:';
 const BIN_MAGIC = Buffer.from('EVB1');
+const SCAN_BUFFER_BYTES = 256 * 1024;
 
 function toF32(v) {
   if (v instanceof Float32Array) return v;
@@ -190,39 +191,51 @@ class VectorStore {
     }
     try {
       const size = fs.fstatSync(input).size;
-      const readAt = (buffer, position) => {
-        let offset = 0;
-        while (offset < buffer.length) {
-          const bytes = fs.readSync(input, buffer, offset, buffer.length - offset, position + offset);
-          if (!bytes) return false;
-          offset += bytes;
+      const chunk = Buffer.allocUnsafe(SCAN_BUFFER_BYTES);
+      let chunkOffset = 0;
+      let chunkLength = 0;
+      let filePosition = 0;
+      let position = 0;
+      const refill = () => {
+        chunkOffset = 0;
+        chunkLength = fs.readSync(input, chunk, 0, chunk.length, filePosition);
+        filePosition += chunkLength;
+        return chunkLength > 0;
+      };
+      const readInto = (target) => {
+        let targetOffset = 0;
+        while (targetOffset < target.length) {
+          if (chunkOffset === chunkLength && !refill()) return false;
+          const bytes = Math.min(chunkLength - chunkOffset, target.length - targetOffset);
+          chunk.copy(target, targetOffset, chunkOffset, chunkOffset + bytes);
+          chunkOffset += bytes;
+          targetOffset += bytes;
+          position += bytes;
         }
         return true;
       };
       const header = Buffer.allocUnsafe(8);
-      if (size < header.length || !readAt(header, 0) || !header.subarray(0, 4).equals(BIN_MAGIC)) return;
+      if (size < header.length || !readInto(header) || !header.subarray(0, 4).equals(BIN_MAGIC)) return;
       const count = header.readUInt32LE(4);
-      let position = 8;
       let vectorBuffer = Buffer.allocUnsafe(0);
+      let idAndDimension = Buffer.allocUnsafe(0);
       const short = Buffer.allocUnsafe(2);
       for (let index = 0; index < count; index += 1) {
-        if (position + 4 > size || !readAt(short, position)) return;
+        if (position + 4 > size || !readInto(short)) return;
         const idLength = short.readUInt16LE(0);
-        position += 2;
         if (!idLength || position + idLength + 2 > size) return;
-        const idAndDimension = Buffer.allocUnsafe(idLength + 2);
-        if (!readAt(idAndDimension, position)) return;
-        const id = idAndDimension.subarray(0, idLength).toString('utf8');
-        const dimension = idAndDimension.readUInt16LE(idLength);
-        position += idLength + 2;
+        if (idAndDimension.length < idLength + 2) idAndDimension = Buffer.allocUnsafe(idLength + 2);
+        const idAndDimensionView = idAndDimension.subarray(0, idLength + 2);
+        if (!readInto(idAndDimensionView)) return;
+        const id = idAndDimensionView.subarray(0, idLength).toString('utf8');
+        const dimension = idAndDimensionView.readUInt16LE(idLength);
         const byteLength = dimension * 4;
         if (!dimension || position + byteLength > size) return;
         if (vectorBuffer.length < byteLength + 3) vectorBuffer = Buffer.allocUnsafe(byteLength + 3);
         const padding = (4 - (vectorBuffer.byteOffset % 4)) % 4;
         const vectorView = vectorBuffer.subarray(padding, padding + byteLength);
-        if (!readAt(vectorView, position)) return;
+        if (!readInto(vectorView)) return;
         cb(id, dimension, vectorView);
-        position += byteLength;
       }
     } finally {
       fs.closeSync(input);
