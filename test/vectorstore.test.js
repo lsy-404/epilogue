@@ -83,3 +83,74 @@ test('vector search supports dimensions above the previous fixed scratch limit',
   assert.equal(hits[0].record.fileName, 'wide.txt');
   assert.equal(hits[0].score, 1);
 });
+
+test('stream scan combines each id and dimension read', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'epilogue-vectors-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const indexFile = path.join(root, 'index.json');
+  const store = new VectorStore(indexFile);
+  const count = 12;
+  for (let i = 0; i < count; i += 1) {
+    store.upsert(record(path.join(root, `record-${i}.txt`), [i + 1, 1, 0]));
+  }
+  store.flush();
+
+  const reloaded = new VectorStore(indexFile);
+  const originalRead = fs.readSync;
+  let reads = 0;
+  fs.readSync = function countedRead(...args) {
+    reads += 1;
+    return originalRead.apply(this, args);
+  };
+  try {
+    reloaded.searchByVector([1, 1, 0], 3);
+  } finally {
+    fs.readSync = originalRead;
+  }
+  assert.ok(reads <= count * 3 + 1, `expected at most three reads per vector, received ${reads}`);
+});
+
+test('metadata-only upsert keeps the persisted vector without rewriting vectors.bin', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'epilogue-vectors-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const indexFile = path.join(root, 'index.json');
+  const filePath = path.join(root, 'alpha.txt');
+  const store = new VectorStore(indexFile);
+  store.upsert(record(filePath, [1, 0]));
+  store.flush();
+
+  const originalRename = fs.renameSync;
+  let vectorRenames = 0;
+  fs.renameSync = function countedRename(from, to) {
+    if (path.resolve(String(to)) === path.join(root, 'vectors.bin')) vectorRenames += 1;
+    return originalRename.call(this, from, to);
+  };
+  try {
+    store.upsert({ ...record(filePath), summary: 'updated summary' });
+    store.flush();
+  } finally {
+    fs.renameSync = originalRename;
+  }
+
+  assert.equal(vectorRenames, 0);
+  const hits = new VectorStore(indexFile).searchByVector([1, 0], 1);
+  assert.equal(hits[0].record.summary, 'updated summary');
+  assert.equal(hits[0].record.vecDim, 2);
+});
+
+test('vector search retains only the requested highest scoring hits', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'epilogue-vectors-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const indexFile = path.join(root, 'index.json');
+  const store = new VectorStore(indexFile);
+  for (let i = 0; i < 40; i += 1) {
+    store.upsert(record(path.join(root, `rank-${i}.txt`), [i + 1, 1]));
+  }
+  store.flush();
+
+  const hits = new VectorStore(indexFile).searchByVector([1, 0], 5);
+  assert.equal(hits.length, 5);
+  assert.deepEqual(hits.map((hit) => hit.record.fileName), [
+    'rank-39.txt', 'rank-38.txt', 'rank-37.txt', 'rank-36.txt', 'rank-35.txt',
+  ]);
+});
