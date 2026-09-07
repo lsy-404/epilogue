@@ -245,17 +245,20 @@ class VectorStore {
   upsert(record) {
     const i = this.pathIndex.get(record.filePath) ?? -1;
     const existing = i >= 0 ? this.records[i] : null;
-    const withId = { id: existing ? existing.id : `f_${crypto.randomUUID()}`, ...record };
-    const f = withId.vector != null ? toF32(withId.vector) : null;
+    const withId = { ...record, id: existing ? existing.id : (record.id || `f_${crypto.randomUUID()}`) };
+    const hasVector = Object.prototype.hasOwnProperty.call(record, 'vector');
+    const f = hasVector && record.vector != null ? toF32(record.vector) : null;
     delete withId.vector; // 向量不驻留 records
     if (f) {
       this.pendingVec.set(withId.id, f);
       withId.vecDim = f.length;
       this.vectorDirty = true;
-    } else if (existing) {
+    } else if (!hasVector && existing) {
       withId.vecDim = existing.vecDim;
     } else {
+      const hadPending = this.pendingVec.delete(withId.id);
       delete withId.vecDim;
+      if ((existing && hasVec(existing)) || hadPending) this.vectorDirty = true;
     }
     if (i >= 0) {
       this.records[i] = withId;
@@ -376,7 +379,7 @@ class VectorStore {
     this._scanBin((id, dim, vecBuf) => {
       if (dim !== q.length || this.pendingVec.has(id)) return;
       const record = this.idIndex.get(id);
-      if (!record) return;
+      if (!record || !hasVec(record)) return;
       const view = new Float32Array(vecBuf.buffer, vecBuf.byteOffset, dim);
       consider(record, VectorStore.cosine(q, view));
     });

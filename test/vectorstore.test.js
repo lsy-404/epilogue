@@ -148,7 +148,9 @@ test('metadata-only upsert keeps the persisted vector without rewriting vectors.
     return originalRename.call(this, from, to);
   };
   try {
-    store.upsert({ ...record(filePath), summary: 'updated summary' });
+    const metadata = { ...record(filePath), summary: 'updated summary' };
+    delete metadata.vector;
+    store.upsert(metadata);
     store.flush();
   } finally {
     fs.renameSync = originalRename;
@@ -158,6 +160,40 @@ test('metadata-only upsert keeps the persisted vector without rewriting vectors.
   const hits = new VectorStore(indexFile).searchByVector([1, 0], 1);
   assert.equal(hits[0].record.summary, 'updated summary');
   assert.equal(hits[0].record.vecDim, 2);
+});
+
+test('explicit null vector removes persisted and pending vectors immediately', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'epilogue-vectors-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const indexFile = path.join(root, 'index.json');
+  const filePath = path.join(root, 'alpha.txt');
+  const store = new VectorStore(indexFile);
+  store.upsert(record(filePath, [1, 0]));
+  store.flush();
+
+  store.upsert({ ...record(filePath), vector: null });
+  assert.deepEqual(store.searchByVector([1, 0], 1), []);
+  assert.equal(store.get(filePath).vecDim, undefined);
+  store.flush();
+
+  const reloaded = new VectorStore(indexFile);
+  assert.deepEqual(reloaded.searchByVector([1, 0], 1), []);
+  assert.equal(reloaded.get(filePath).vecDim, undefined);
+});
+
+test('upsert retains an existing internal id when input includes a different id', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'epilogue-vectors-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const indexFile = path.join(root, 'index.json');
+  const filePath = path.join(root, 'alpha.txt');
+  const store = new VectorStore(indexFile);
+  const first = store.upsert(record(filePath, [1, 0]));
+  const updated = store.upsert({ ...record(filePath, [0, 1]), id: 'untrusted-replacement-id' });
+  store.flush();
+
+  assert.equal(updated.id, first.id);
+  assert.equal(store.idIndex.has('untrusted-replacement-id'), false);
+  assert.equal(store.searchByVector([0, 1], 1)[0].record.id, first.id);
 });
 
 test('vector search retains only the requested highest scoring hits', (t) => {
