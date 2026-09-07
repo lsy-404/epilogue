@@ -50,9 +50,6 @@ jobs:
           node-version: 22
           cache: npm
 
-      - uses: ./.github/actions/prepare-model-auth
-        with:
-          token: ${{ secrets.PLATFORM_KIT_TOKEN }}
       - name: Install dependencies
         if: ${{ !(matrix.platform == 'win32' && matrix.arch == 'arm64') }}
         shell: bash
