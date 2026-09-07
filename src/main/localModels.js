@@ -81,6 +81,7 @@ function ensureChild() {
       pending.delete(id);
       p.reject(new Error('模型进程已退出（可能内存不足），将自动重启，请重试'));
     }
+    scheduleIdleShutdown();
   });
   return host;
 }
