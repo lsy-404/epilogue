@@ -11,6 +11,7 @@ const WHISPER_QUALITY = {
   high: 'Xenova/whisper-small',
 };
 const DEFAULT_EMBED_MODEL = 'Xenova/bge-small-zh-v1.5';
+const IDLE_SHUTDOWN_DELAY_MS = 5000;
 
 function cacheDir() {
   return path.join(app.getPath('userData'), 'models');
@@ -19,13 +20,33 @@ function cacheDir() {
 /* ---------- 子进程管理 ---------- */
 let child = null;
 let seq = 0;
-const pending = new Map(); // id -> {resolve, reject}
+const pending = new Map(); // id -> {resolve, reject, host}
 const progressListeners = new Set();
+let shutdownWhenIdle = true;
+let shutdownTimer = null;
+let hostEnvironment = null;
+
+function clearShutdownTimer() {
+  if (shutdownTimer) clearTimeout(shutdownTimer);
+  shutdownTimer = null;
+}
+
+function scheduleIdleShutdown() {
+  if (!child || !shutdownWhenIdle || pending.size > 0 || shutdownTimer) return;
+  shutdownTimer = setTimeout(() => {
+    shutdownTimer = null;
+    if (shutdownWhenIdle && pending.size === 0) {
+      restartHost();
+      require('./log').log('models', 'host shut down (tray idle)');
+    }
+  }, IDLE_SHUTDOWN_DELAY_MS);
+  shutdownTimer.unref?.();
+}
 
 function ensureChild() {
   if (child) return child;
   const settings = require('./settings');
-  child = utilityProcess.fork(path.join(__dirname, 'modelHost.js'), [], {
+  const host = utilityProcess.fork(path.join(__dirname, 'modelHost.js'), [], {
     serviceName: 'epilogue-models',
     env: {
       ...process.env,
@@ -34,7 +55,8 @@ function ensureChild() {
       EPILOGUE_IMG_DEVICE: settings.get().imageEmbed?.device || 'auto',
     },
   });
-  child.on('message', (msg) => {
+  child = host;
+  host.on('message', (msg) => {
     if (msg.hostlog) {
       require('./log').log('models', msg.hostlog.msg, msg.hostlog.extra);
       return;
@@ -47,28 +69,41 @@ function ensureChild() {
     if (p) {
       pending.delete(msg.id);
       msg.ok ? p.resolve(msg.result) : p.reject(new Error(msg.error));
+      scheduleIdleShutdown();
     }
   });
-  child.on('exit', () => {
-    child = null;
-    // 子进程意外退出（大概率推理 OOM）：拒绝所有挂起调用，下次调用自动重启
-    require('./log').log('models', 'host exited', { pendingCalls: pending.size });
-    for (const p of pending.values()) p.reject(new Error('模型进程已退出（可能内存不足），将自动重启，请重试'));
-    pending.clear();
+  host.on('exit', () => {
+    if (child === host) child = null;
+    // 子进程意外退出时只拒绝投递给它的调用，避免旧实例影响新实例。
+    const affected = [...pending.entries()].filter(([, p]) => p.host === host);
+    require('./log').log('models', 'host exited', { pendingCalls: affected.length });
+    for (const [id, p] of affected) {
+      pending.delete(id);
+      p.reject(new Error('模型进程已退出（可能内存不足），将自动重启，请重试'));
+    }
   });
-  return child;
+  return host;
 }
 
 function call(op, ...args) {
   return new Promise((resolve, reject) => {
     const id = ++seq;
-    pending.set(id, { resolve, reject });
-    ensureChild().postMessage({ id, op, args });
+    clearShutdownTimer();
+    const host = ensureChild();
+    pending.set(id, { resolve, reject, host });
+    try {
+      host.postMessage({ id, op, args });
+    } catch (error) {
+      pending.delete(id);
+      reject(error);
+      scheduleIdleShutdown();
+    }
   });
 }
 
 // 设置（镜像）变更或删除模型后重启子进程，释放其内存中的 pipeline
 function restartHost() {
+  clearShutdownTimer();
   if (child) {
     try {
       child.kill();
@@ -79,12 +114,25 @@ function restartHost() {
   }
 }
 
-// 托盘纯保活（046）：关窗时若子进程空闲则关停，释放其缓存的模型内存；下次调用自动拉起。
-// 忙（Solo/定时任务推理中）则跳过，不打断。
+// 关窗后等待当前推理结束再关停，避免托盘态保留模型内存。
 function idleShutdown() {
-  if (!child || pending.size > 0) return;
-  restartHost();
-  require('./log').log('models', 'host shut down (tray idle)');
+  shutdownWhenIdle = true;
+  scheduleIdleShutdown();
+}
+
+function cancelIdleShutdown() {
+  shutdownWhenIdle = false;
+  clearShutdownTimer();
+}
+
+function applyHostSettings(cfg) {
+  const next = {
+    hfMirror: cfg.app.hfMirror || '',
+    imageDevice: cfg.imageEmbed?.device || 'auto',
+  };
+  const changed = hostEnvironment && (hostEnvironment.hfMirror !== next.hfMirror || hostEnvironment.imageDevice !== next.imageDevice);
+  hostEnvironment = next;
+  if (changed) restartHost();
 }
 
 /* ---------- 支持文件状态/删除（纯 fs，主进程） ---------- */
@@ -178,5 +226,5 @@ function clipTextEmbed(texts, model) {
 
 module.exports = {
   status, download, remove, embed, transcribe, extractRemote, imageEmbed, clipTextEmbed,
-  restartHost, idleShutdown, dirHasOnnx, WHISPER_QUALITY, DEFAULT_EMBED_MODEL,
+  restartHost, idleShutdown, cancelIdleShutdown, applyHostSettings, dirHasOnnx, WHISPER_QUALITY, DEFAULT_EMBED_MODEL,
 };
