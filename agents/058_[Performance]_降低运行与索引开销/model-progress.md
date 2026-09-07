@@ -11,10 +11,12 @@
 - `npm test`：52 项全部通过。
 - 只读复审主仓 IPC storeUsers/withStore/resumeStore；开始在 openWindow 接入 resumeStore。
 - 在 index.js 的 openWindow 首部调用 ipc.resumeStore；未修改 IPC。
--
-pm test：52 项全部通过。
+- npm test：52 项全部通过。
 
 - 复审发现 tray idle 意图与 postMessage 同步异常的两个遗留回归，开始修复。
 - 修复持续 tray idle 意图与 postMessage 抛错 pending 清理；新增两项回归测试。
--
-pm test：53 项全部通过。
+- npm test：53 项全部通过。
+
+- 开始修复旧 host pending 与新 host 完成的回收排序。
+- 在旧 host exit 清理后重新安排空闲回收；添加精确事件顺序测试。
+- npm test：54 项全部通过。

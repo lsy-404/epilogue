@@ -26,3 +26,8 @@
 - `postMessage` 是同步调用；若其抛错，当前 Promise executor 会 reject，但 pending Map 中的条目不会删除，导致以后始终被判定为忙碌。
 - timer 回调不再清除 `shutdownWhenIdle`；首次回收后的后续托盘任务仍会在完成后安排回收。
 - `call` 捕获同步 postMessage 异常、删除对应 pending、拒绝请求，并按现有 tray 意图安排空闲回收。
+
+## 旧宿主退出后的空闲回收
+
+- 旧 host 被重启后仍有 pending；新 host 先完成时，pending Map 非空导致不安排回收。旧 host exit 清理最后一个 pending 后必须再次调用 `scheduleIdleShutdown`。
+- old host exit 在清理其 pending 后调用 `scheduleIdleShutdown`；若 replacement 已空闲且 tray intent 有效，会恢复其遗漏的回收 timer。
