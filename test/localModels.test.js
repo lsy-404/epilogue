@@ -10,6 +10,29 @@ const localModelsPath = require.resolve('../src/main/localModels');
 const settingsPath = require.resolve('../src/main/settings');
 const logPath = require.resolve('../src/main/log');
 const nextTurn = () => new Promise((resolve) => setImmediate(resolve));
+const hostSettings = (hfMirror = '', imageDevice = 'auto') => ({ app: { hfMirror }, imageEmbed: { device: imageDevice } });
+
+function useFakeTimers() {
+  const originalSetTimeout = global.setTimeout;
+  const originalClearTimeout = global.clearTimeout;
+  const timers = [];
+  global.setTimeout = (callback, delay) => {
+    const timer = { callback, delay, cleared: false, unref: () => timer };
+    timers.push(timer);
+    return timer;
+  };
+  global.clearTimeout = (timer) => { timer.cleared = true; };
+  return {
+    timers,
+    run(timer) {
+      if (!timer.cleared) timer.callback();
+    },
+    restore() {
+      global.setTimeout = originalSetTimeout;
+      global.clearTimeout = originalClearTimeout;
+    },
+  };
+}
 
 function loadLocalModels() {
   const hosts = [];
@@ -70,6 +93,7 @@ function loadLocalModels() {
 }
 
 test('idle shutdown waits for the active model request and then reclaims the host', async () => {
+  const clock = useFakeTimers();
   const fixture = loadLocalModels();
   try {
     const request = fixture.localModels.embed(['document']);
@@ -79,14 +103,17 @@ test('idle shutdown waits for the active model request and then reclaims the hos
 
     host.emit('message', { id: host.messages[0].id, ok: true, result: [[0.1]] });
     await assert.doesNotReject(request);
-    await nextTurn();
+    assert.equal(clock.timers[0].delay, 5000);
+    clock.run(clock.timers[0]);
     assert.equal(host.kills, 1);
   } finally {
     fixture.restore();
+    clock.restore();
   }
 });
 
 test('reopening the window cancels a deferred idle shutdown', async () => {
+  const clock = useFakeTimers();
   const fixture = loadLocalModels();
   try {
     const request = fixture.localModels.embed(['document']);
@@ -95,10 +122,78 @@ test('reopening the window cancels a deferred idle shutdown', async () => {
     fixture.localModels.cancelIdleShutdown();
     host.emit('message', { id: host.messages[0].id, ok: true, result: [[0.1]] });
     await request;
-    await nextTurn();
+    assert.equal(clock.timers.length, 0);
     assert.equal(host.kills, 0);
   } finally {
     fixture.restore();
+    clock.restore();
+  }
+});
+
+test('an idle delay keeps the host alive across sequential batch requests', async () => {
+  const clock = useFakeTimers();
+  const fixture = loadLocalModels();
+  try {
+    const first = fixture.localModels.embed(['first']);
+    const host = fixture.hosts[0];
+    fixture.localModels.idleShutdown();
+    host.emit('message', { id: host.messages[0].id, ok: true, result: [[0.1]] });
+    await first;
+    await nextTurn();
+
+    const second = fixture.localModels.embed(['second']);
+    assert.equal(clock.timers[0].cleared, true);
+    host.emit('message', { id: host.messages[1].id, ok: true, result: [[0.2]] });
+    await second;
+    assert.equal(host.kills, 0);
+    clock.run(clock.timers[1]);
+    assert.equal(host.kills, 1);
+  } finally {
+    fixture.restore();
+    clock.restore();
+  }
+});
+
+test('only model-host environment setting changes restart the host', async () => {
+  const clock = useFakeTimers();
+  const fixture = loadLocalModels();
+  try {
+    fixture.localModels.applyHostSettings(hostSettings());
+    const request = fixture.localModels.embed(['document']);
+    const host = fixture.hosts[0];
+    host.emit('message', { id: host.messages[0].id, ok: true, result: [[0.1]] });
+    await request;
+
+    fixture.localModels.applyHostSettings({ ...hostSettings(), language: 'zh' });
+    assert.equal(host.kills, 0);
+    fixture.localModels.applyHostSettings(hostSettings('https://mirror.example.test'));
+    assert.equal(host.kills, 1);
+
+    const replacement = fixture.localModels.embed(['replacement']);
+    const replacementHost = fixture.hosts[1];
+    replacementHost.emit('message', { id: replacementHost.messages[0].id, ok: true, result: [[0.2]] });
+    await replacement;
+    fixture.localModels.applyHostSettings(hostSettings('https://mirror.example.test', 'cpu'));
+    assert.equal(replacementHost.kills, 1);
+  } finally {
+    fixture.restore();
+    clock.restore();
+  }
+});
+
+test('a later tray task is also reclaimed after the quiet period', async () => {
+  const clock = useFakeTimers();
+  const fixture = loadLocalModels();
+  try {
+    const request = fixture.localModels.embed(['later']);
+    const host = fixture.hosts[0];
+    host.emit('message', { id: host.messages[0].id, ok: true, result: [[0.1]] });
+    await request;
+    clock.run(clock.timers[0]);
+    assert.equal(host.kills, 1);
+  } finally {
+    fixture.restore();
+    clock.restore();
   }
 });
 

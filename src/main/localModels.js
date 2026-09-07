@@ -11,6 +11,7 @@ const WHISPER_QUALITY = {
   high: 'Xenova/whisper-small',
 };
 const DEFAULT_EMBED_MODEL = 'Xenova/bge-small-zh-v1.5';
+const IDLE_SHUTDOWN_DELAY_MS = 5000;
 
 function cacheDir() {
   return path.join(app.getPath('userData'), 'models');
@@ -21,17 +22,26 @@ let child = null;
 let seq = 0;
 const pending = new Map(); // id -> {resolve, reject, host}
 const progressListeners = new Set();
-let shutdownWhenIdle = false;
+let shutdownWhenIdle = true;
+let shutdownTimer = null;
+let hostEnvironment = null;
+
+function clearShutdownTimer() {
+  if (shutdownTimer) clearTimeout(shutdownTimer);
+  shutdownTimer = null;
+}
 
 function scheduleIdleShutdown() {
-  if (!shutdownWhenIdle || pending.size > 0) return;
-  setImmediate(() => {
+  if (!child || !shutdownWhenIdle || pending.size > 0 || shutdownTimer) return;
+  shutdownTimer = setTimeout(() => {
+    shutdownTimer = null;
     if (shutdownWhenIdle && pending.size === 0) {
       shutdownWhenIdle = false;
       restartHost();
       require('./log').log('models', 'host shut down (tray idle)');
     }
-  });
+  }, IDLE_SHUTDOWN_DELAY_MS);
+  shutdownTimer.unref?.();
 }
 
 function ensureChild() {
@@ -79,6 +89,7 @@ function ensureChild() {
 function call(op, ...args) {
   return new Promise((resolve, reject) => {
     const id = ++seq;
+    clearShutdownTimer();
     const host = ensureChild();
     pending.set(id, { resolve, reject, host });
     host.postMessage({ id, op, args });
@@ -87,7 +98,7 @@ function call(op, ...args) {
 
 // 设置（镜像）变更或删除模型后重启子进程，释放其内存中的 pipeline
 function restartHost() {
-  shutdownWhenIdle = false;
+  clearShutdownTimer();
   if (child) {
     try {
       child.kill();
@@ -100,13 +111,23 @@ function restartHost() {
 
 // 关窗后等待当前推理结束再关停，避免托盘态保留模型内存。
 function idleShutdown() {
-  if (!child) return;
   shutdownWhenIdle = true;
   scheduleIdleShutdown();
 }
 
 function cancelIdleShutdown() {
   shutdownWhenIdle = false;
+  clearShutdownTimer();
+}
+
+function applyHostSettings(cfg) {
+  const next = {
+    hfMirror: cfg.app.hfMirror || '',
+    imageDevice: cfg.imageEmbed?.device || 'auto',
+  };
+  const changed = hostEnvironment && (hostEnvironment.hfMirror !== next.hfMirror || hostEnvironment.imageDevice !== next.imageDevice);
+  hostEnvironment = next;
+  if (changed) restartHost();
 }
 
 /* ---------- 支持文件状态/删除（纯 fs，主进程） ---------- */
@@ -200,5 +221,5 @@ function clipTextEmbed(texts, model) {
 
 module.exports = {
   status, download, remove, embed, transcribe, extractRemote, imageEmbed, clipTextEmbed,
-  restartHost, idleShutdown, cancelIdleShutdown, dirHasOnnx, WHISPER_QUALITY, DEFAULT_EMBED_MODEL,
+  restartHost, idleShutdown, cancelIdleShutdown, applyHostSettings, dirHasOnnx, WHISPER_QUALITY, DEFAULT_EMBED_MODEL,
 };

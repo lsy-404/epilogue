@@ -117,7 +117,7 @@ function applyAppSettings(cfg) {
     /* 开发模式或受限环境 */
   }
   if (tray) buildTrayMenu(); // 语言切换后同步托盘菜单
-  require('./localModels').restartHost(); // 镜像等变更后重启模型子进程
+  require('./localModels').applyHostSettings(cfg);
   scheduler.restart();
 }
 
