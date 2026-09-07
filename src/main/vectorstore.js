@@ -1,10 +1,10 @@
 'use strict';
-// 本地向量库（045 双文件架构 —— 避免全量加载进内存）：
+// 本地向量库：避免全量加载进内存。
 //   index.json   gzip JSON 元数据（无向量；record.vecDim 标维度），常驻内存的只有这部分
 //   vectors.bin  'EVB1' 魔数 + count(u32le)，每条 [idLen u16le][id utf8][dim u16le][f32le×dim]
-// 向量检索时流扫 bin（scratch Float32Array 复用，零分配），扫完即弃不常驻；
+// 向量检索时流扫 bin，扫完即弃不常驻；
 // 新写入向量在 pendingVec 暂存，flush 时与旧 bin 合并重写（临时文件 + rename 原子）。
-// 迁移：旧单文件（明文 number[] / gzip 'f32:'+base64 两代）load 时解出 → 标 dirty → flush 落双文件。
+// 旧单文件在加载时解出，并在下次写入时落入双文件。
 const fs = require('fs');
 const crypto = require('crypto');
 const path = require('path');
@@ -12,6 +12,7 @@ const zlib = require('zlib');
 
 const VEC_PREFIX = 'f32:';
 const BIN_MAGIC = Buffer.from('EVB1');
+const SCAN_BUFFER_BYTES = 256 * 1024;
 
 function toF32(v) {
   if (v instanceof Float32Array) return v;
@@ -48,7 +49,9 @@ class VectorStore {
     this.vecFile = path.join(path.dirname(file), 'vectors.bin');
     this.records = [];
     this.pathIndex = new Map(); // filePath -> records index，大库 upsert/get 保持 O(1)
+    this.idIndex = new Map(); // id -> record，检索时不必重建映射
     this.pendingVec = new Map(); // id -> Float32Array（新写入/迁移暂存，flush 后清）
+    this.vectorDirty = false;
     try {
       const buf = fs.readFileSync(file);
       const text = buf[0] === 0x1f && buf[1] === 0x8b ? zlib.gunzipSync(buf).toString('utf8') : buf.toString('utf8');
@@ -66,7 +69,10 @@ class VectorStore {
           migrated = true;
         }
       }
-      if (migrated) this.save();
+      if (migrated) {
+        this.vectorDirty = true;
+        this.save();
+      }
     } catch {
       /* 首次运行 */
     }
@@ -75,8 +81,11 @@ class VectorStore {
 
   _rebuildPathIndex() {
     this.pathIndex.clear();
+    this.idIndex.clear();
     for (let index = 0; index < this.records.length; index += 1) {
-      this.pathIndex.set(this.records[index].filePath, index);
+      const record = this.records[index];
+      this.pathIndex.set(record.filePath, index);
+      this.idIndex.set(record.id, record);
     }
   }
 
@@ -101,7 +110,7 @@ class VectorStore {
     try {
       // 先原子替换向量文件；若随后崩溃，旧元数据至多忽略多出的向量，
       // 不会指向不存在的新记录。下次 flush 会按内存中的 records 再次收敛。
-      this._rewriteBin();
+      if (this.vectorDirty) this._rewriteBin();
       const metadata = zlib.gzipSync(Buffer.from(JSON.stringify(this.records)), { level: 1 });
       const temp = `${this.file}.tmp`;
       let output;
@@ -118,6 +127,7 @@ class VectorStore {
         throw error;
       }
       this.dirty = false;
+      this.vectorDirty = false;
     } catch (error) {
       this.dirty = true;
       throw error;
@@ -181,40 +191,51 @@ class VectorStore {
     }
     try {
       const size = fs.fstatSync(input).size;
-      const readAt = (buffer, position) => {
-        let offset = 0;
-        while (offset < buffer.length) {
-          const bytes = fs.readSync(input, buffer, offset, buffer.length - offset, position + offset);
-          if (!bytes) return false;
-          offset += bytes;
+      const chunk = Buffer.allocUnsafe(SCAN_BUFFER_BYTES);
+      let chunkOffset = 0;
+      let chunkLength = 0;
+      let filePosition = 0;
+      let position = 0;
+      const refill = () => {
+        chunkOffset = 0;
+        chunkLength = fs.readSync(input, chunk, 0, chunk.length, filePosition);
+        filePosition += chunkLength;
+        return chunkLength > 0;
+      };
+      const readInto = (target) => {
+        let targetOffset = 0;
+        while (targetOffset < target.length) {
+          if (chunkOffset === chunkLength && !refill()) return false;
+          const bytes = Math.min(chunkLength - chunkOffset, target.length - targetOffset);
+          chunk.copy(target, targetOffset, chunkOffset, chunkOffset + bytes);
+          chunkOffset += bytes;
+          targetOffset += bytes;
+          position += bytes;
         }
         return true;
       };
       const header = Buffer.allocUnsafe(8);
-      if (size < header.length || !readAt(header, 0) || !header.subarray(0, 4).equals(BIN_MAGIC)) return;
+      if (size < header.length || !readInto(header) || !header.subarray(0, 4).equals(BIN_MAGIC)) return;
       const count = header.readUInt32LE(4);
-      let position = 8;
       let vectorBuffer = Buffer.allocUnsafe(0);
+      let idAndDimension = Buffer.allocUnsafe(0);
       const short = Buffer.allocUnsafe(2);
       for (let index = 0; index < count; index += 1) {
-        if (position + 4 > size || !readAt(short, position)) return;
+        if (position + 4 > size || !readInto(short)) return;
         const idLength = short.readUInt16LE(0);
-        position += 2;
         if (!idLength || position + idLength + 2 > size) return;
-        const idBuffer = Buffer.allocUnsafe(idLength);
-        if (!readAt(idBuffer, position)) return;
-        const id = idBuffer.toString('utf8');
-        position += idLength;
-        if (!readAt(short, position)) return;
-        const dimension = short.readUInt16LE(0);
-        position += 2;
+        if (idAndDimension.length < idLength + 2) idAndDimension = Buffer.allocUnsafe(idLength + 2);
+        const idAndDimensionView = idAndDimension.subarray(0, idLength + 2);
+        if (!readInto(idAndDimensionView)) return;
+        const id = idAndDimensionView.subarray(0, idLength).toString('utf8');
+        const dimension = idAndDimensionView.readUInt16LE(idLength);
         const byteLength = dimension * 4;
         if (!dimension || position + byteLength > size) return;
-        if (vectorBuffer.length < byteLength) vectorBuffer = Buffer.allocUnsafe(byteLength);
-        const vectorView = vectorBuffer.subarray(0, byteLength);
-        if (!readAt(vectorView, position)) return;
+        if (vectorBuffer.length < byteLength + 3) vectorBuffer = Buffer.allocUnsafe(byteLength + 3);
+        const padding = (4 - (vectorBuffer.byteOffset % 4)) % 4;
+        const vectorView = vectorBuffer.subarray(padding, padding + byteLength);
+        if (!readInto(vectorView)) return;
         cb(id, dimension, vectorView);
-        position += byteLength;
       }
     } finally {
       fs.closeSync(input);
@@ -223,18 +244,29 @@ class VectorStore {
 
   upsert(record) {
     const i = this.pathIndex.get(record.filePath) ?? -1;
-    const withId = { id: i >= 0 ? this.records[i].id : `f_${crypto.randomUUID()}`, ...record };
-    const f = withId.vector != null ? toF32(withId.vector) : null;
+    const existing = i >= 0 ? this.records[i] : null;
+    const withId = { ...record, id: existing ? existing.id : (record.id || `f_${crypto.randomUUID()}`) };
+    const hasVector = Object.prototype.hasOwnProperty.call(record, 'vector');
+    const f = hasVector && record.vector != null ? toF32(record.vector) : null;
     delete withId.vector; // 向量不驻留 records
     if (f) {
       this.pendingVec.set(withId.id, f);
       withId.vecDim = f.length;
+      this.vectorDirty = true;
+    } else if (!hasVector && existing) {
+      withId.vecDim = existing.vecDim;
+    } else {
+      const hadPending = this.pendingVec.delete(withId.id);
+      delete withId.vecDim;
+      if ((existing && hasVec(existing)) || hadPending) this.vectorDirty = true;
     }
     if (i >= 0) {
       this.records[i] = withId;
+      this.idIndex.set(withId.id, withId);
     } else {
       this.pathIndex.set(record.filePath, this.records.length);
       this.records.push(withId);
+      this.idIndex.set(withId.id, withId);
     }
     this.save();
     return withId;
@@ -243,7 +275,9 @@ class VectorStore {
   remove(filePath) {
     const index = this.pathIndex.get(filePath);
     if (index == null) return;
-    this.pendingVec.delete(this.records[index].id);
+    const record = this.records[index];
+    this.pendingVec.delete(record.id);
+    if (hasVec(record)) this.vectorDirty = true;
     this.records.splice(index, 1);
     this._rebuildPathIndex();
     this.save();
@@ -291,7 +325,10 @@ class VectorStore {
   removeKind(kind) {
     const before = this.records.length;
     const gone = this.records.filter((r) => (r.kind || 'other') === kind);
-    for (const r of gone) this.pendingVec.delete(r.id);
+    for (const r of gone) {
+      this.pendingVec.delete(r.id);
+      if (hasVec(r)) this.vectorDirty = true;
+    }
     this.records = this.records.filter((r) => (r.kind || 'other') !== kind);
     this._rebuildPathIndex();
     this.save();
@@ -310,34 +347,47 @@ class VectorStore {
     return dot / (Math.sqrt(na) * Math.sqrt(nb) || 1);
   }
 
-  // 向量检索：流扫 bin + pendingVec，scratch 复用零分配；向量扫完即弃不常驻
+  // 向量检索：流扫 bin，固定容量 top-k 堆避免为全部候选排序。
   searchByVector(queryVector, topK = 8) {
     const q = toF32(queryVector);
-    if (!q) return [];
-    const byId = new Map(this.records.map((r) => [r.id, r]));
+    const limit = Math.max(0, Math.floor(Number(topK) || 0));
+    if (!q || !limit) return [];
     const hits = [];
     const consider = (record, score) => {
-      hits.push({ record, score });
-      if (hits.length > topK * 4) {
-        hits.sort((a, b) => b.score - a.score);
-        hits.length = topK;
+      const hit = { record, score };
+      if (hits.length < limit) {
+        hits.push(hit);
+        for (let child = hits.length - 1; child > 0;) {
+          const parent = (child - 1) >> 1;
+          if (hits[parent].score <= hits[child].score) break;
+          [hits[parent], hits[child]] = [hits[child], hits[parent]];
+          child = parent;
+        }
+      } else if (score > hits[0].score) {
+        hits[0] = hit;
+        for (let parent = 0;;) {
+          const left = parent * 2 + 1;
+          if (left >= hits.length) break;
+          const right = left + 1;
+          const child = right < hits.length && hits[right].score < hits[left].score ? right : left;
+          if (hits[parent].score <= hits[child].score) break;
+          [hits[parent], hits[child]] = [hits[child], hits[parent]];
+          parent = child;
+        }
       }
     };
-    let scratch = new Float32Array(0);
     this._scanBin((id, dim, vecBuf) => {
       if (dim !== q.length || this.pendingVec.has(id)) return;
-      const record = byId.get(id);
-      if (!record) return;
-      if (scratch.length < dim) scratch = new Float32Array(dim);
-      const view = scratch.subarray(0, dim);
-      Buffer.from(view.buffer, 0, dim * 4).set(vecBuf); // 对齐复制到 scratch
+      const record = this.idIndex.get(id);
+      if (!record || !hasVec(record)) return;
+      const view = new Float32Array(vecBuf.buffer, vecBuf.byteOffset, dim);
       consider(record, VectorStore.cosine(q, view));
     });
     for (const [id, f] of this.pendingVec) {
-      const record = byId.get(id);
+      const record = this.idIndex.get(id);
       if (record && f.length === q.length) consider(record, VectorStore.cosine(q, f));
     }
-    return hits.sort((a, b) => b.score - a.score).slice(0, topK);
+    return hits.sort((a, b) => b.score - a.score);
   }
 
   static tokenize(text) {
