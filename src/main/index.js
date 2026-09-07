@@ -37,7 +37,8 @@ if (!app.requestSingleInstanceLock()) {
 
 // 托盘常驻模式下不预载 UI：窗口只在打开时创建，关闭即销毁，渲染进程内存随之释放
 function openWindow(view) {
-  if (process.platform === 'darwin') app.dock?.show(); // 托盘态隐藏的 Dock 随窗口恢复（047）
+  require('./localModels').cancelIdleShutdown();
+  if (process.platform === 'darwin') app.dock?.show(); // 托盘态隐藏的 Dock 随窗口恢复
   if (win && !win.isDestroyed()) {
     win.show();
     win.focus();
@@ -79,11 +80,11 @@ function openWindow(view) {
   });
   win.on('closed', () => {
     win = null;
-    // 托盘纯保活（044/046）：卸索引数据、空闲时关停模型子进程、主动 GC 收缩堆 ——
+    // 托盘纯保活：卸索引数据、空闲时关停模型子进程、主动 GC 收缩堆 ——
     // 托盘态只剩 托盘图标 + 定时器 + 设置缓存；一切按需惰性重建
     ipc.unloadStore();
     require('./localModels').idleShutdown();
-    // 托盘驻留时不占 Dock（047）：纯托盘存在，重开窗口时恢复
+    // 托盘驻留时不占 Dock：纯托盘存在，重开窗口时恢复
     if (process.platform === 'darwin' && settings.get().app.trayKeepAlive) app.dock?.hide();
     setTimeout(() => {
       try {
@@ -145,7 +146,7 @@ function buildTrayMenu() {
 function createTray() {
   const img = nativeImage.createFromPath(TRAY_ICON);
   if (img.isEmpty()) {
-    // 048：图标加载失败（路径/asar 问题）必须可诊断，否则只看到系统默认图标
+    // 图标加载失败（路径/asar 问题）必须可诊断，否则只看到系统默认图标
     require('./log').log('app', 'tray icon failed to load', { path: TRAY_ICON });
   }
   if (process.platform === 'darwin') img.setTemplateImage(true); // 菜单栏深浅自适配（深色下呈白色）
@@ -187,7 +188,7 @@ app.whenReady().then(() => {
     process.argv.includes('--hidden') ||
     (process.platform === 'darwin' && app.getLoginItemSettings().wasOpenedAtLogin);
   if (!hiddenLaunch || !settings.get().tosAccepted) openWindow();
-  else if (process.platform === 'darwin') app.dock?.hide(); // 静默托盘启动：不占 Dock（047）
+  else if (process.platform === 'darwin') app.dock?.hide(); // 静默托盘启动：不占 Dock
 
   app.on('activate', () => openWindow());
 });
