@@ -13,16 +13,23 @@ test('Windows and Linux clear Electron default File/Edit application menus', () 
   assert.match(source, /process\.platform !== 'darwin'\) Menu\.setApplicationMenu\(null\)/);
 });
 
-test('chat Add opens the shared model-auth element through the trusted host', () => {
+test('chat connections use shared panel and auth elements through the trusted host', () => {
   const html = read('src/renderer/index.html');
   const renderer = read('src/renderer/app.js');
   const preload = read('src/preload.js');
   const shared = read('src/renderer/modelAuth.js');
   const ipc = read('src/main/ipc.js');
   assert.match(html, /<model-auth-dialog><\/model-auth-dialog>/);
-  assert.match(html, /id="modelAuthOpen"/);
+  assert.match(html, /<model-connection-panel><\/model-connection-panel>/);
+  assert.match(html, /id="providers-chat"/);
+  assert.match(html, /Advanced provider configuration/);
   assert.doesNotMatch(html, /id="providerSourceOverlay"/);
   assert.match(shared, /registerModelAuthElement/);
+  assert.match(shared, /registerModelConnectionPanelElement/);
+  assert.match(shared, /panel\?\.addEventListener\('manage'/);
+  assert.match(shared, /panel\?\.addEventListener\('add'/);
+  assert.match(shared, /dialog\.initialConnection = initialConnection/);
+  assert.match(renderer, /providerId = provider === 'anthropic'/);
   assert.match(shared, /modelAuthExecute/);
   assert.match(shared, /modelAuthCancel/);
   assert.match(preload, /modelAuthState/);

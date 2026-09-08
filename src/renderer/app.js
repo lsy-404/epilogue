@@ -1001,7 +1001,8 @@ function speedOf(p) {
 // 行布局：拖动手柄 | 内容 | …… | 启用（右侧）| ✕ 删除（最右，内置/本机无）
 function renderProviders(type) {
   const list = currentSettings.providers[type];
-  $(`#providers-${type}`).innerHTML = list
+  const container = $(`#providers-${type}`);
+  container.innerHTML = list
     .map((p, i) => {
       const locked = p.keyless || p.type === 'local'; // 免 Key/本机连接锁定关键字段（无 tag）
       const oauth = Boolean(p.oauthProvider);
@@ -1108,7 +1109,13 @@ document.body.addEventListener('change', (e) => {
 
 document.body.addEventListener('click', async (e) => {
   const oauthManage = e.target.closest('[data-oauth-manage]');
-  if (oauthManage) window.openModelAuth?.();
+  if (oauthManage) {
+    const provider = oauthManage.dataset.oauthManage;
+    const providerId = provider === 'anthropic' ? 'catalog:anthropic'
+      : provider === 'openai-codex' ? 'catalog:openai'
+        : `oauth:${provider}`;
+    window.openModelAuth?.({ providerId, method: 'oauth' });
+  }
   const advanced = e.target.closest('[data-p-advanced]');
   if (advanced) openProviderAdvanced(+advanced.dataset.pAdvanced);
   const discover = e.target.closest('[data-p-models]');

@@ -232,9 +232,13 @@
 
       <div class="tab-page hidden" id="tab-capabilities">
         <div class="panel">
-          <div class="panel-head"><h2 data-i18n="prov_chat"></h2><button class="btn ghost" id="modelAuthOpen" data-i18n="prov_add"></button></div>
-          <div class="provider-list" id="providers-chat"></div>
-          <p class="hint" data-i18n="drag_hint"></p>
+          <div class="panel-head"><h2 data-i18n="prov_chat"></h2></div>
+          <model-connection-panel></model-connection-panel>
+          <details class="provider-advanced-section">
+            <summary>Advanced provider configuration</summary>
+            <div class="provider-list" id="providers-chat"></div>
+            <p class="hint" data-i18n="drag_hint"></p>
+          </details>
           <p class="hint" data-i18n="prov_hint_chat"></p>
         </div>
 

@@ -1,14 +1,16 @@
-import { registerModelAuthElement } from '../../node_modules/@model-auth/vue/dist/model-auth-element.js';
+import { registerModelAuthElement, registerModelConnectionPanelElement } from '../../node_modules/@model-auth/vue/dist/model-auth-element.js';
 
 registerModelAuthElement();
+registerModelConnectionPanelElement();
 const dialog = document.querySelector('model-auth-dialog');
-const openButton = document.querySelector('#modelAuthOpen');
+const panel = document.querySelector('model-connection-panel');
 let activeOperation = null;
 let dialogEpoch = 0;
 
 async function refresh() {
   const state = await window.epologue.modelAuthState();
   Object.assign(dialog, { providers: state.providers, model: state.model, catalogStatus: state.catalogStatus, theme: 'system' });
+  Object.assign(panel, { providers: state.providers, model: state.model, busy: false, error: null, styled: true, theme: 'system' });
 }
 function actionFor(event) {
   const detail = Array.isArray(event.detail) ? event.detail : [event.detail];
@@ -35,8 +37,9 @@ async function perform(event) {
   catch { dialog.error = 'Operation could not be completed. Check the provider configuration and try again.'; }
   finally { if (activeOperation === operationId) activeOperation = null; dialog.busy = false; }
 }
-async function open() {
+async function open(initialConnection = null) {
   dialogEpoch += 1;
+  dialog.initialConnection = initialConnection;
   dialog.open = true;
   if (dialog.busy) return;
   dialog.busy = true;
@@ -46,12 +49,21 @@ async function open() {
   finally { dialog.busy = false; }
 }
 window.openModelAuth = open;
-openButton?.addEventListener('click', open);
 dialog.addEventListener('close', () => {
   dialogEpoch += 1;
   if (activeOperation) void window.epologue.modelAuthCancel(activeOperation);
   dialog.open = false;
+  void refresh().catch(() => {});
 });
+panel?.addEventListener('manage', (event) => {
+  const [connection] = event.detail;
+  if (connection?.providerId) void open(connection);
+});
+panel?.addEventListener('add', () => { void open(); });
+panel?.addEventListener('refresh', () => {
+  void refresh().catch(() => { panel.error = 'Could not load model connections. Try again.'; });
+});
+void refresh().catch(() => { if (panel) panel.error = 'Could not load model connections. Try again.'; });
 for (const type of ['authorize-oauth', 'add-api-key', 'remove-credential', 'update-credential', 'update-provider', 'select-model', 'update-provider-strategy', 'refresh-catalog']) dialog.addEventListener(type, perform);
 dialog.addEventListener('reconnect-oauth', (event) => perform(new CustomEvent('authorize-oauth', { detail: event.detail })));
 dialog.addEventListener('remove-oauth', (event) => {

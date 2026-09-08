@@ -88,7 +88,42 @@ async function state() {
         return { id: account.id, label: account.label || oauthDefinition.name, account: account.accountId, healthy: true, enabled: record ? record.enabled !== false : false, weight: Number.isInteger(record?.weight) ? record.weight : 1, models, cooldownUntilUtc: null };
       }) } : {}) };
   });
-  const oauthProviders = [...OAUTH_PROVIDERS].filter(([id]) => !apiProviders.some(provider => provider.id === id)).map(([id, definition]) => {
+  const savedApiProviders = [...new Set(records.filter((record) => record.authType !== 'oauth').map(routeId))]
+    .filter((id) => !apiProviders.some((provider) => provider.id === id))
+    .map((id) => {
+      const saved = records.filter((record) => record.authType !== 'oauth' && routeId(record) === id);
+      const models = [...new Set(saved.map((record) => record.model).filter(Boolean))];
+      const options = providerOptions(cfg, id);
+      const oauthDefinition = OAUTH_PROVIDERS.get(id);
+      const accounts = oauthDefinition ? oauth.listAccounts(oauthDefinition.oauthProvider) : [];
+      const linked = oauthDefinition ? records.filter((record) => record.authType === 'oauth' && routeId(record) === id) : [];
+      return {
+        id,
+        name: saved[0]?.name || id,
+        description: 'Saved API key connection; provider directory is unavailable.',
+        authMethods: oauthDefinition ? ['oauth', 'api-key'] : ['api-key'],
+        available: false,
+        unavailableReason: 'Provider directory is unavailable. The saved connection can still be reviewed or removed.',
+        oauthEnabled: options.oauthEnabled !== false,
+        loadStrategy: options.strategy,
+        models,
+        oauthModels: oauthDefinition ? models : [],
+        apiKeyModels: models,
+        ...(oauthDefinition ? { oauthCredentials: accounts.map((account) => {
+          const record = linked.find((candidate) => credentialId(candidate) === account.id);
+          return { id: account.id, label: account.label || oauthDefinition.name, account: account.accountId, healthy: true, enabled: record ? record.enabled !== false : false, weight: Number.isInteger(record?.weight) ? record.weight : 1, models, cooldownUntilUtc: null };
+        }) } : {}),
+        apiKeyCredentials: saved.map((record) => ({
+          id: credentialId(record),
+          label: record.name || id,
+          healthy: false,
+          enabled: record.enabled !== false,
+          weight: Number.isInteger(record.weight) ? record.weight : 1,
+          models: record.model ? [record.model] : [],
+        })),
+      };
+    });
+  const oauthProviders = [...OAUTH_PROVIDERS].filter(([id]) => !apiProviders.some(provider => provider.id === id) && !savedApiProviders.some(provider => provider.id === id)).map(([id, definition]) => {
     const options = providerOptions(cfg, id);
     const accounts = oauth.listAccounts(definition.oauthProvider);
     const linked = records.filter((record) => record.authType === 'oauth' && (routeId(record) === id || record.oauthProvider === definition.oauthProvider));
@@ -103,7 +138,7 @@ async function state() {
       }),
     };
   });
-  return { providers: [...oauthProviders, await traeProvider(records), ...apiProviders], model: cfg.modelAuthSelection || null, catalogStatus };
+  return { providers: [...oauthProviders, await traeProvider(records), ...apiProviders, ...savedApiProviders], model: cfg.modelAuthSelection || null, catalogStatus };
 }
 
 function updateRecords(providerId, credential, update) {
