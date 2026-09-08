@@ -18,7 +18,7 @@ test('real host state exposes all OAuth entries and uniquely merges built-in API
       if (request === './settings') return { get: () => ({ providers: { chat: [] } }) };
       if (request === './providerOAuth') return { listAccounts: () => [] };
       if (request === './providerCatalog') return { getCatalog: async () => { if (offline) throw new Error('catalog unavailable'); return { providers: fixture }; } };
-      if (request === './trae') return { sessionHome: () => '/test/profile', status: async () => ({ available: false, authenticated: false }) };
+      if (request === './trae') return { store: () => ({ list: () => [], status: async () => ({ authenticated: false }) }), models: async () => [] };
     }
     return load.apply(this, arguments);
   };

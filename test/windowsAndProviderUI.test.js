@@ -29,7 +29,7 @@ test('chat Add opens the shared model-auth element through the trusted host', ()
   assert.match(preload, /modelAuthCancel/);
   assert.match(ipc, /model-auth:execute/);
   assert.match(ipc, /model-auth:cancel/);
-  assert.match(read('src/main/modelAuth.js'), /trae-account-default/);
+  assert.match(read('src/main/modelAuth.js'), /Official browser OAuth/);
 });
 
 test('the native dialog stays mounted while the host controls its open state', () => {

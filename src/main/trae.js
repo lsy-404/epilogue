@@ -1,58 +1,27 @@
 'use strict';
 
+const crypto = require('crypto');
+const fs = require('fs');
 const path = require('path');
-const { app } = require('electron');
 
-function sessionHome(id) {
-  if (!/^[a-zA-Z0-9_-]{1,96}$/.test(String(id))) throw new Error('Invalid TRAE session id.');
-  return path.join(app.getPath('userData'), 'trae-enterprise', String(id));
+function metadata(credential, id = `oauth:trae:${credential.accountId || crypto.randomUUID()}`) { return { id, label: credential.label || 'TRAE account', accountId: credential.accountId || null, expires: credential.expires, host: credential.host, region: credential.region || null }; }
+class TraeCredentialStore {
+  constructor({ app, safeStorage, shell, fsImpl = fs, fetchImpl = fetch }) { this.app = app; this.safeStorage = safeStorage; this.shell = shell; this.fs = fsImpl; this.fetch = fetchImpl; }
+  filePath() { return path.join(this.app.getPath('userData'), 'trae-oauth-accounts.json'); }
+  assertEncryption() { if (!this.safeStorage?.isEncryptionAvailable?.()) throw new Error('System credential encryption is unavailable; TRAE credentials were not saved.'); }
+  records() { try { const value = JSON.parse(this.fs.readFileSync(this.filePath(), 'utf8')); return Array.isArray(value.accounts) ? value.accounts.filter((item) => item.id && item.encrypted) : []; } catch { return []; } }
+  write(accounts) { this.assertEncryption(); const target = this.filePath(); this.fs.mkdirSync(path.dirname(target), { recursive: true }); const temp = `${target}.tmp`; this.fs.writeFileSync(temp, JSON.stringify({ version: 1, accounts }), 'utf8'); this.fs.renameSync(temp, target); }
+  decrypt(record) { this.assertEncryption(); return JSON.parse(this.safeStorage.decryptString(Buffer.from(record.encrypted, 'base64'))); }
+  save(credential, id) { this.assertEncryption(); const item = metadata(credential, id); const next = { ...item, encrypted: this.safeStorage.encryptString(JSON.stringify(credential)).toString('base64') }; const records = this.records(); const index = records.findIndex((record) => record.id === item.id); if (index >= 0) records[index] = next; else records.push(next); this.write(records); return metadata(credential, item.id); }
+  list() { return this.records().map(({ encrypted, ...item }) => item); }
+  remove(id) { const records = this.records(); const next = records.filter((record) => record.id !== id); if (next.length === records.length) return false; this.write(next); return true; }
+  async authorize({ signal } = {}) { const api = await import('@model-auth/providers/trae'); const credential = await api.authorizeTrae({ openExternal: (url) => this.shell.openExternal(url), fetchImpl: this.fetch, signal }); return this.save(credential); }
+  async credentialFor(id, { signal } = {}) { const record = this.records().find((item) => item.id === id); if (!record) throw new Error('TRAE account was not found.'); let credential = this.decrypt(record); if (Number(credential.expires) <= Date.now() + 60_000) { const api = await import('@model-auth/providers/trae'); credential = await api.refreshTrae(credential, { fetchImpl: this.fetch, signal }); this.save(credential, record.id); } return credential; }
+  async status(id, options = {}) { try { const api = await import('@model-auth/providers/trae'); return await api.traeStatus(await this.credentialFor(id, options), { fetchImpl: this.fetch, signal: options.signal }); } catch (error) { return { authenticated: false, detail: 'unauthenticated', error: String(error?.message || error) }; } }
 }
-
-async function providerFor(session) {
-  const { TraeProvider } = await import('@model-auth/providers/trae');
-  return new TraeProvider({ session: { homeDir: session.homeDir, ...(session.label ? { label: session.label } : {}), ...(session.host ? { host: session.host } : {}) } });
-}
-
-function unavailable(error) {
-  return { available: false, authenticated: false, error: String(error?.message || error || 'Trae enterprise CLI is unavailable.') };
-}
-
-async function status(session, signal) {
-  try { return await (await providerFor(session)).status(signal); } catch (error) { return unavailable(error); }
-}
-
-async function login(session, signal) {
-  const provider = await providerFor(session);
-  await provider.login(signal);
-  const result = await provider.status(signal);
-  if (!result.available || !result.authenticated) throw new Error('Trae enterprise CLI did not report an authenticated session.');
-  return result;
-}
-
-async function logout(session, signal) {
-  const provider = await providerFor(session);
-  if (typeof provider.logout !== 'function') throw new Error('Trae enterprise CLI logout is not available in this adapter release.');
-  await provider.logout(signal);
-}
-
-function promptFor(messages) {
-  return messages.map((message) => `${message.role.toUpperCase()}: ${typeof message.content === 'string' ? message.content : JSON.stringify(message.content || '')}`).join('\n\n');
-}
-
-async function chatCompletion(record, messages, options = {}) {
-  const provider = await providerFor({ homeDir: record.traeHome, label: record.name, host: record.traeHost });
-  const result = await provider.execute(executionRequest(record, messages, options));
-  const toolCalls = (result?.toolCalls || []).map((call) => ({ id: String(call.id), name: String(call.toolName), arguments: JSON.parse(call.argumentsJson) }));
-  const text = typeof result?.assistantText === 'string' ? result.assistantText : '';
-  if (!text && !toolCalls.length) throw new Error('Trae enterprise CLI returned no structured result.');
-  return { text, toolCalls, finishReason: toolCalls.length ? 'tool_calls' : 'stop', usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 }, provider: { name: record.name || 'Trae Enterprise CLI', model: record.model || null, protocol: 'trae-cli' } };
-}
-
-function executionRequest(record, messages, options = {}) {
-  const tools = (options.tools || []).map((tool) => ({ name: tool.name, description: tool.description, inputSchema: tool.parameters || { type: 'object', properties: {} } }));
-  return { prompt: promptFor(messages), ...(record.model && record.model !== 'trae-account-default' ? { model: record.model } : {}), ...(tools.length ? { tools } : {}), ...(record.traeCwd ? { cwd: record.traeCwd } : {}), signal: options.signal };
-}
-
-function newSession() { const id = 'default'; return { id, homeDir: sessionHome(id) }; }
-
-module.exports = { sessionHome, newSession, status, login, logout, executionRequest, chatCompletion };
+let singleton;
+function store() { if (!singleton) { const { app, safeStorage, shell } = require('electron'); singleton = new TraeCredentialStore({ app, safeStorage, shell }); } return singleton; }
+function promptFor(messages) { if (!Array.isArray(messages) || messages.some((message) => !['system', 'user', 'assistant'].includes(message.role) || typeof message.content !== 'string')) throw new Error('TRAE browser OAuth supports text system, user, and assistant messages only; tool history is unsupported.'); return messages; }
+async function models(id, options = {}) { const credential = await store().credentialFor(id, options); const api = await import('@model-auth/providers/trae'); return api.listTraeModels(credential, { fetchImpl: store().fetch, signal: options.signal }); }
+async function chatCompletion(record, messages, options = {}) { if (options.tools?.length) throw new Error('TRAE browser OAuth currently supports text-only completion; tool definitions are unsupported.'); const textMessages = promptFor(messages); const credential = await store().credentialFor(record.credentialId, options); const api = await import('@model-auth/providers/trae'); const result = await api.completeTrae(credential, { model: record.model, messages: textMessages, fetchImpl: store().fetch, signal: options.signal }); return { text: result.text, reasoning: result.reasoning, finishReason: result.finishReason, usage: result.usage, provider: { name: record.name || 'TRAE', model: record.model, protocol: 'trae' } }; }
+module.exports = { TraeCredentialStore, metadata, store, models, chatCompletion, promptFor };

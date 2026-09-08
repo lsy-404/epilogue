@@ -1,18 +1,21 @@
 'use strict';
-
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const trae = require('../src/main/trae');
-
-test('TRAE account-default leaves model selection to the authenticated CLI session', () => {
-  const request = trae.executionRequest({ model: 'trae-account-default' }, [{ role: 'user', content: 'Ping' }]);
-  assert.equal('model' in request, false);
+function fixtureStore() {
+  const files = new Map();
+  const safeStorage = { isEncryptionAvailable: () => true, encryptString: (value) => Buffer.from(value), decryptString: (value) => Buffer.from(value).toString() };
+  const fs = { readFileSync: (file) => { if (!files.has(file)) throw new Error('missing'); return files.get(file); }, writeFileSync: (file, value) => files.set(file, value), renameSync: (from, to) => { files.set(to, files.get(from)); files.delete(from); }, mkdirSync: () => {} };
+  return { store: new trae.TraeCredentialStore({ app: { getPath: () => '/profile' }, safeStorage, shell: { openExternal: async () => {} }, fsImpl: fs }), files };
+}
+test('TRAE stores the full browser credential encrypted while exposing sanitized metadata', () => {
+  const { store, files } = fixtureStore();
+  const account = store.save({ access: 'access-secret', refresh: 'refresh-secret', expires: Date.now() + 3600000, host: 'https://www.trae.ai', device: { privateKeyPem: 'private-secret' }, accountId: 'person' });
+  assert.deepEqual(Object.keys(account).sort(), ['accountId', 'expires', 'host', 'id', 'label', 'region']);
+  assert.doesNotMatch(files.get('/profile/trae-oauth-accounts.json'), /access-secret|refresh-secret|private-secret/);
+  assert.equal(store.remove(account.id), true);
 });
-
-test('TRAE forwards only an explicit non-default model and structured tools', () => {
-  const request = trae.executionRequest({ model: 'enterprise-model', traeCwd: '/tmp' }, [{ role: 'user', content: 'Ping' }], {
-    tools: [{ name: 'lookup', description: 'Lookup', parameters: { type: 'object', properties: {} } }],
-  });
-  assert.equal(request.model, 'enterprise-model');
-  assert.equal(request.tools[0].inputSchema.type, 'object');
+test('TRAE refuses tool definitions and tool history rather than dropping them', async () => {
+  await assert.rejects(() => trae.chatCompletion({ credentialId: 'x', model: 'm' }, [{ role: 'tool', content: 'result' }]), /tool history/);
+  await assert.rejects(() => trae.chatCompletion({ credentialId: 'x', model: 'm' }, [{ role: 'user', content: 'hello' }], { tools: [{ name: 'read' }] }), /text-only/);
 });

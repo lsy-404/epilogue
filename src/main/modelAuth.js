@@ -10,8 +10,7 @@ const OAUTH_PROVIDERS = new Map([
   ['catalog:openai', { oauthProvider: 'openai-codex', name: 'OpenAI', catalogProviderId: 'openai' }],
   ['oauth:workbuddy', { oauthProvider: 'workbuddy', name: 'WorkBuddy', catalogProviderId: 'workbuddy' }],
 ]);
-const TRAE_PROVIDER_ID = 'oauth:trae-enterprise';
-const TRAE_ACCOUNT_DEFAULT_MODEL = 'trae-account-default';
+const TRAE_PROVIDER_ID = 'oauth:trae';
 const WORKBUDDY_RUNTIME_MODELS = new Set(['glm-5.2', 'glm-5.1', 'glm-5v-turbo', 'kimi-k2.7', 'minimax-m3-pay', 'hy3', 'deepseek-v4-pro', 'deepseek-v4-flash']);
 const WORKBUDDY_CATALOG_PROVIDERS = new Set(['zhipuai', 'deepseek', 'tencent-tokenhub']);
 
@@ -21,7 +20,7 @@ function modelsForOauth(definition, listed) {
 }
 
 function routeId(provider) {
-  if (provider?.protocol === 'trae-cli') return TRAE_PROVIDER_ID;
+  if (provider?.protocol === 'trae') return TRAE_PROVIDER_ID;
   if (provider?.authType === 'oauth' && provider.oauthProvider) return [...OAUTH_PROVIDERS].find(([, definition]) => definition.oauthProvider === provider.oauthProvider)?.[0] || `oauth:${provider.oauthProvider}`;
   if (provider?.source?.provider) return `catalog:${provider.source.provider}`;
   return String(provider?.modelAuthProviderId || provider?.id || 'custom');
@@ -29,16 +28,16 @@ function routeId(provider) {
 
 async function traeProvider(records) {
   const trae = require('./trae');
-  const sessions = records.filter((record) => record.protocol === 'trae-cli');
-  const probe = await trae.status({ homeDir: trae.sessionHome('probe') });
-  const statuses = await Promise.all(sessions.map(async (record) => ({ record, status: await trae.status({ homeDir: record.traeHome, label: record.name, host: record.traeHost }) })));
+  const sessions = records.filter((record) => record.protocol === 'trae');
+  const accounts = trae.store().list();
+  const statuses = await Promise.all(sessions.map(async (record) => ({ record, status: await trae.store().status(record.credentialId) })));
   const options = providerOptions(settings.get(), TRAE_PROVIDER_ID);
-  const authenticated = statuses.some(({ status }) => status.available === true && status.authenticated === true);
-  const models = probe.available === true && authenticated ? [TRAE_ACCOUNT_DEFAULT_MODEL] : [];
+  const modelLists = await Promise.all(sessions.map(async (record) => { try { return await trae.models(record.credentialId); } catch { return []; } }));
+  const models = [...new Set(modelLists.flat().map((model) => model.name).filter(Boolean))];
   return {
-    id: TRAE_PROVIDER_ID, name: 'Trae Enterprise CLI', description: probe.available ? '使用 CLI 中设置的账号默认模型；不是 models.dev 模型条目' : 'Enterprise CLI is not available on this device', authMethods: ['oauth'], available: probe.available === true,
-    unavailableReason: probe.available === true ? null : 'Trae Enterprise CLI is not installed or cannot be started.', oauthEnabled: options.oauthEnabled !== false, loadStrategy: options.strategy, models, oauthModels: models,
-    oauthCredentials: statuses.map(({ record, status }) => ({ id: credentialId(record), label: status.sessionLabel || record.name || 'Trae Enterprise CLI', healthy: status.authenticated === true, enabled: record.enabled !== false, weight: Number.isInteger(record.weight) ? record.weight : 1, models, cooldownUntilUtc: null })),
+    id: TRAE_PROVIDER_ID, name: 'TRAE', description: 'Official browser OAuth with authenticated model discovery.', authMethods: ['oauth'], available: true,
+    unavailableReason: null, oauthEnabled: options.oauthEnabled !== false, loadStrategy: options.strategy, models, oauthModels: models,
+    oauthCredentials: accounts.map((account) => { const record = sessions.find((candidate) => credentialId(candidate) === account.id); const status = statuses.find((item) => credentialId(item.record) === account.id)?.status; return { id: account.id, label: account.label, account: account.accountId, healthy: status?.authenticated === true, enabled: record ? record.enabled !== false : false, weight: Number.isInteger(record?.weight) ? record.weight : 1, models: record ? [record.model].filter(Boolean) : models, cooldownUntilUtc: null }; }),
   };
 }
 function credentialId(provider) { return String(provider.credentialId || provider.oauthAccountId || provider.id || ''); }
@@ -125,13 +124,17 @@ async function execute(action, { signal } = {}) {
     if (providerId === TRAE_PROVIDER_ID) {
       const trae = require('./trae');
       const before = settings.get();
-      const prior = (before.providers.chat || []).find((record) => routeId(record) === TRAE_PROVIDER_ID);
-      const session = prior ? { id: credentialId(prior), homeDir: prior.traeHome, label: prior.name, host: prior.traeHost } : trae.newSession();
-      const result = await trae.login(session, signal);
+      const prior = (before.providers.chat || []).find((record) => routeId(record) === TRAE_PROVIDER_ID && credentialId(record) === String(action.credentialId || ''));
+      const account = await trae.store().authorize({ signal });
+      const discovered = await trae.models(account.id, { signal });
+      if (!discovered.length) throw new Error('TRAE returned no models for this account.');
+      const model = prior?.model && discovered.some((item) => item.name === prior.model) ? prior.model : discovered[0].name;
       const cfg = settings.get();
-      const existing = (cfg.providers.chat || []).find((record) => routeId(record) === TRAE_PROVIDER_ID);
-      const chat = (cfg.providers.chat || []).filter((record) => routeId(record) !== TRAE_PROVIDER_ID);
-      chat.push({ id: `trae-route:${session.id}`, name: result.sessionLabel || 'Trae Enterprise CLI', protocol: 'trae-cli', authType: 'trae-cli', credentialId: session.id, modelAuthProviderId: TRAE_PROVIDER_ID, traeHome: session.homeDir, model: TRAE_ACCOUNT_DEFAULT_MODEL, weight: existing?.weight || 1, enabled: existing?.enabled !== false });
+      const reconnectId = String(action.credentialId || '');
+      const existing = (cfg.providers.chat || []).find((record) => routeId(record) === TRAE_PROVIDER_ID && credentialId(record) === (reconnectId || account.id));
+      if (reconnectId && reconnectId !== account.id) trae.store().remove(reconnectId);
+      const chat = (cfg.providers.chat || []).filter((record) => !(routeId(record) === TRAE_PROVIDER_ID && (credentialId(record) === account.id || credentialId(record) === reconnectId)));
+      chat.push({ id: `trae-route:${account.id}`, name: account.label || 'TRAE', protocol: 'trae', authType: 'oauth', credentialId: account.id, modelAuthProviderId: TRAE_PROVIDER_ID, model, weight: existing?.weight || 1, enabled: existing?.enabled !== false });
       settings.set({ providers: { chat } });
       return;
     }
@@ -167,8 +170,7 @@ async function execute(action, { signal } = {}) {
       const definition = OAUTH_PROVIDERS.get(providerId);
       if (definition) oauth.removeAccount(definition.oauthProvider, id);
       if (providerId === TRAE_PROVIDER_ID) {
-        const record = (cfg.providers.chat || []).find((item) => routeId(item) === providerId && credentialId(item) === id);
-        if (record) await require('./trae').logout({ homeDir: record.traeHome, label: record.name, host: record.traeHost }, signal);
+        require('./trae').store().remove(id);
       }
     }
     settings.set({ providers: { chat: (cfg.providers.chat || []).filter((record) => !(routeId(record) === providerId && credentialId(record) === id)) } });

@@ -21,14 +21,14 @@ function headers(provider, extra = {}) {
 // provider 可用：未被禁用，且为本机（type=local）/ 免 Key（内置）/ 已配 Key
 function usable(p) {
   if (!p || p.enabled === false) return false;
-  if (p.protocol === 'trae-cli') return Boolean(p.traeHome);
+  if (p.protocol === 'trae') return Boolean(p.credentialId && p.model);
   if (p.type === 'local') return true;
   if (p.authType === 'oauth' && p.oauthProvider) return Boolean(p.baseUrl && p.model);
   return Boolean(p.baseUrl && (p.keyless || p.apiKey || (Array.isArray(p.apiKeys) && p.apiKeys.some(Boolean))));
 }
 
 function routeAllowed(provider) {
-  if (provider?.protocol === 'trae-cli') return require('./settings').get().providerRouting?.[String(provider.modelAuthProviderId)]?.oauthEnabled !== false;
+  if (provider?.protocol === 'trae') return require('./settings').get().providerRouting?.[String(provider.modelAuthProviderId)]?.oauthEnabled !== false;
   if (provider?.authType !== 'oauth' || !provider.oauthProvider) return true;
   const routing = require('./settings').get().providerRouting?.[String(provider.modelAuthProviderId || provider.oauthProvider)];
   return routing?.oauthEnabled !== false;
@@ -41,7 +41,7 @@ function localOnlyFilter(providers, localOnly) {
 }
 
 function sharedPool(provider) { return Boolean(provider?.modelAuthProviderId); }
-function routingModelId(provider) { return provider.protocol === 'trae-cli' ? 'trae-enterprise-cli' : provider.model; }
+function routingModelId(provider) { return provider.model; }
 function routerProviderId(provider) { return String(provider.modelAuthProviderId).replace(/[^a-zA-Z0-9._-]/g, '-'); }
 function poolCredentialId(provider) { return String(provider.id || provider.credentialId); }
 function errorForRouter(error) {
@@ -65,7 +65,7 @@ async function routeCandidates(list) {
     const modelId = routingModelId(provider);
     if (!credentialId || !modelId) continue;
     if (!routeOrder.includes(providerId)) routeOrder.push(providerId);
-    router.upsert(core.createCredentialMetadata({ id: credentialId, providerId, authMethod: provider.authType === 'oauth' || provider.protocol === 'trae-cli' ? 'oauth' : 'api-key', enabled: provider.enabled !== false, weight: Number(provider.weight) || 1, modelIds: [modelId] }));
+    router.upsert(core.createCredentialMetadata({ id: credentialId, providerId, authMethod: provider.authType === 'oauth' || provider.protocol === 'trae' ? 'oauth' : 'api-key', enabled: provider.enabled !== false, weight: Number(provider.weight) || 1, modelIds: [modelId] }));
     router.setStrategy(cfg.providerRouting?.[provider.modelAuthProviderId]?.strategy || 'round-robin', providerId);
     router.setProviderOAuthEnabled(providerId, cfg.providerRouting?.[provider.modelAuthProviderId]?.oauthEnabled !== false);
     byCredential.set(credentialId, provider);
@@ -210,7 +210,7 @@ function aggregateSseChatCompletion(payload) {
 }
 
 async function chatCompletion(provider, messages, options = {}) {
-  if (provider?.protocol === 'trae-cli') return require('./trae').chatCompletion(provider, messages, options);
+  if (provider?.protocol === 'trae') return require('./trae').chatCompletion(provider, messages, options);
   provider = await require('./providerOAuth').resolveProviderRecord(provider);
   if (adapters.protocolOf(provider) === adapters.PROTOCOLS.OPENAI_COMPATIBLE && provider.responseMode !== 'manual') {
     return throttled(provider, () => compatibleChatCompletion(provider, messages, options));
