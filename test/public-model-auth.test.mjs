@@ -11,7 +11,7 @@ for (const name of ["core", "providers"]) {
   assert.equal(manifest.dependencies[`@model-auth/${name}`], `${release}/model-auth-${name}-0.3.0.tgz`);
   assert.match(lock, new RegExp(`${release.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/model-auth-${name}-0\\.3\\.0\\.tgz`));
 }
-const vueRelease = "https://github.com/lsy-404/platform-kit/releases/download/v0.3.0/model-auth-vue-0.4.0.tgz";
+const vueRelease = "https://github.com/lsy-404/platform-kit/releases/download/v0.3.1/model-auth-vue-0.4.1.tgz";
 assert.equal(manifest.dependencies["@model-auth/vue"], vueRelease);
 assert.match(lock, new RegExp(vueRelease.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 const workflow = await readFile(path.join(root, ".github/workflows/release.yml"), "utf8");
