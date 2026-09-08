@@ -142,10 +142,10 @@ function migrate(parsed) {
     }
     // v3：IRIS 风格多协议模型接入器。旧 chat provider 保持 OpenAI Chat Completions 语义。
     if (Array.isArray(ch)) {
-      const trae = ch.filter((provider) => provider.protocol === 'trae-cli');
-      if (trae.length > 1) ch = [...ch.filter((provider) => provider.protocol !== 'trae-cli'), trae[0]];
+      const trae = ch.filter((provider) => provider.protocol === 'trae');
+      if (trae.length > 1) ch = [...ch.filter((provider) => provider.protocol !== 'trae'), trae[0]];
       parsed.providers.chat = ch;
-      const allowed = new Set(['openai-compatible', 'openai-completions', 'openai-responses', 'anthropic-messages', 'trae-cli']);
+      const allowed = new Set(['openai-compatible', 'openai-completions', 'openai-responses', 'anthropic-messages', 'trae']);
       for (const provider of ch) {
         if (!allowed.has(provider.protocol)) provider.protocol = 'openai-completions';
       }

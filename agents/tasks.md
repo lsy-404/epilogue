@@ -10,3 +10,4 @@
 | 002 | [Feature]_trae-enterprise-cli | 接入已验证的企业版 Trae CLI adapter，并隔离每个应用和凭据的 CLI home | 只展示可真实验证的企业 CLI 能力 | ⏳ 待处理 |
 | 003 | [Maintenance]_model-auth-v0.2.2-dialog | 同步共享 model-auth v0.2.5 确认按钮动画时序补丁，保留宿主关闭生命周期保护 | 消费正式归档并完成全套回归 | ✅ 已完成 |
 | 058 | [Performance]_降低运行与索引开销 | 并行优化向量、扫描、模型回收和 IPC 分页并实测 | 用户要求性能与开销优化 | ✅ 已完成 |
+| 059 | [Refactor]_trae-browser-oauth | 迁移到共享浏览器授权、真实模型目录和文本推理 | 移除对本机 CLI 与占位模型的依赖 | 🔄 进行中 |
