@@ -13,11 +13,12 @@ test('real host state exposes all OAuth entries and uniquely merges built-in API
   });
   let offline = false;
   const savedKey = { id: 'saved-key', name: 'Saved Anthropic', source: { provider: 'anthropic' }, model: 'model-two', apiKey: 'fixture-only', enabled: true, weight: 2 };
+  const savedOAuth = { id: 'oauth-route:anthropic:fixture-account', name: 'Fixture account', authType: 'oauth', oauthProvider: 'anthropic', credentialId: 'fixture-account', modelAuthProviderId: 'catalog:anthropic', enabled: true, weight: 1 };
   delete require.cache[entry];
   Module._load = function(request, parent, main) {
     if (parent?.filename === entry) {
-      if (request === './settings') return { get: () => ({ providers: { chat: offline ? [savedKey] : [] } }) };
-      if (request === './providerOAuth') return { listAccounts: () => [] };
+      if (request === './settings') return { get: () => ({ providers: { chat: offline ? [savedKey, savedOAuth] : [] } }) };
+      if (request === './providerOAuth') return { listAccounts: (provider) => provider === 'anthropic' && offline ? [{ id: 'fixture-account', label: 'Fixture account', accountId: 'fixture-account' }] : [] };
       if (request === './providerCatalog') return { getCatalog: async () => { if (offline) throw new Error('catalog unavailable'); return { providers: fixture }; } };
       if (request === './trae') return { store: () => ({ list: () => [], status: async () => ({ authenticated: false }) }), models: async () => [] };
     }
@@ -32,13 +33,15 @@ test('real host state exposes all OAuth entries and uniquely merges built-in API
       assert.equal(oauth.length, 4);
       assert.equal(new Set(state.providers.map(provider => provider.id)).size, state.providers.length);
       for (const id of ['catalog:anthropic', 'catalog:openai', 'oauth:workbuddy']) {
-        assert.equal(oauth.find(provider => provider.id === id).available, !(degraded && id === 'catalog:anthropic'));
+        assert.equal(oauth.find(provider => provider.id === id).available, true);
       }
       if (!degraded) {
         assert.deepEqual(state.providers.find(provider => provider.id === 'catalog:anthropic').authMethods, ['oauth', 'api-key']);
       } else {
         const saved = state.providers.find(provider => provider.id === 'catalog:anthropic');
-        assert.equal(saved.available, false);
+        assert.equal(saved.available, true);
+        assert.deepEqual(saved.oauthCredentials.map(item => item.id), ['fixture-account']);
+        assert.deepEqual(saved.oauthModels, []);
         assert.deepEqual(saved.apiKeyCredentials.map(item => ({ id: item.id, label: item.label, models: item.models, weight: item.weight })), [{ id: 'saved-key', label: 'Saved Anthropic', models: ['model-two'], weight: 2 }]);
         assert.doesNotMatch(JSON.stringify(saved), /fixture-only/);
       }

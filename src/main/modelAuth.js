@@ -95,6 +95,7 @@ async function state() {
       const models = [...new Set(saved.map((record) => record.model).filter(Boolean))];
       const options = providerOptions(cfg, id);
       const oauthDefinition = OAUTH_PROVIDERS.get(id);
+      const oauthModels = oauthDefinition ? modelsForOauth(oauthDefinition, listed) : [];
       const accounts = oauthDefinition ? oauth.listAccounts(oauthDefinition.oauthProvider) : [];
       const linked = oauthDefinition ? records.filter((record) => record.authType === 'oauth' && routeId(record) === id) : [];
       return {
@@ -102,12 +103,12 @@ async function state() {
         name: saved[0]?.name || id,
         description: 'Saved API key connection; provider directory is unavailable.',
         authMethods: oauthDefinition ? ['oauth', 'api-key'] : ['api-key'],
-        available: false,
-        unavailableReason: 'Provider directory is unavailable. The saved connection can still be reviewed or removed.',
+        available: Boolean(oauthDefinition),
+        unavailableReason: oauthDefinition ? null : 'Provider directory is unavailable. The saved connection can still be reviewed or removed.',
         oauthEnabled: options.oauthEnabled !== false,
         loadStrategy: options.strategy,
-        models,
-        oauthModels: oauthDefinition ? models : [],
+        models: [...new Set([...oauthModels, ...models])],
+        oauthModels,
         apiKeyModels: models,
         ...(oauthDefinition ? { oauthCredentials: accounts.map((account) => {
           const record = linked.find((candidate) => credentialId(candidate) === account.id);
