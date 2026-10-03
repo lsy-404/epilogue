@@ -23,14 +23,16 @@
     "officeparser": "^6.0.7",
     "pdfjs-dist": "6.2.108"
   },
-  "overrides": {
-    "adm-zip": "$adm-zip",
-    "pdfjs-dist": "$pdfjs-dist",
-    "sharp": "0.35.4"
-  },
   "devDependencies": {
     "@electron/asar": "4.2.0",
     "@electron/packager": "^20.0.1",
     "electron": "^44.0.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "adm-zip": "$adm-zip",
+      "pdfjs-dist": "$pdfjs-dist",
+      "sharp": "0.35.4"
+    }
   }
 }
