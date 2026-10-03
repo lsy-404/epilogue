@@ -2,20 +2,21 @@
   "name": "epilogue",
   "productName": "Epilogue",
   "version": "0.4.1",
+  "packageManager": "pnpm@10.34.6",
   "description": "Epilogue — AI file workflow: understand, organize and recall your files.",
   "main": "src/main/index.js",
   "license": "SEE LICENSE IN LICENSE",
   "author": "Wuyilingwei",
   "scripts": {
     "start": "electron .",
-    "test": "node --test test/*.test.js"
+    "test": "node -e \"require('electron')\" && node --test test/*.test.js"
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "^2.0.73",
     "@huggingface/transformers": "^4.2.0",
-    "@model-auth/core": "https://github.com/lsy-404/platform-kit/releases/download/v0.6.1/model-auth-core-0.6.1.tgz",
-    "@model-auth/providers": "https://github.com/lsy-404/platform-kit/releases/download/v0.6.1/model-auth-providers-0.6.1.tgz",
-    "@model-auth/vue": "https://github.com/lsy-404/platform-kit/releases/download/v0.6.1/model-auth-vue-0.6.1.tgz",
+    "@model-auth/core": "file:vendor/model-auth/core-0.3.0.tgz",
+    "@model-auth/providers": "file:vendor/model-auth/providers-0.3.0.tgz",
+    "@model-auth/vue": "file:vendor/model-auth/vue-0.4.1.tgz",
     "adm-zip": "^0.6.0",
     "ai": "^6.0.271",
     "ffmpeg-static": "^5.2.0",

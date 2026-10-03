@@ -43,9 +43,9 @@ Heavily optimized for low footprint: the tray-resident app uses almost no resour
 ## Run & Develop
 
 ```bash
-npm install
-npm start      # launch the app
-npm test       # unit tests
+corepack pnpm@10.34.6 install --frozen-lockfile
+pnpm start      # launch the app
+pnpm test       # unit tests
 bash scripts/pack.sh [platform] [arch]   # local packaging
 ```
 
@@ -58,3 +58,7 @@ Pushing a `v*` tag triggers CI for every supported release target. macOS Intel i
 - No telemetry, no analytics, no phone-home; all data stays on your machine and can be inspected and cleaned in-app.
 - When you use AI features, relevant file content is sent to **the providers you configure (or the built-in defaults)**, governed by their own privacy policies; avoid AI features on highly sensitive files.
 - License: **ALE 1.1 (Anti-Labor Exploitation License, prevailing) & GPL-3.0** — GPL rights are conditional on ALE compliance; ALE's restrictions apply primarily to commercial and employing entities. Full terms and license texts are bundled in-app (Settings → About).
+
+### Pinned model-auth dependencies
+
+`@model-auth/core`, `@model-auth/providers`, and `@model-auth/vue` use fixed local archives in `vendor/model-auth/` for repeatable installs. These preserve the archives authenticated by the original lockfile SHA-512 values; the same upstream download URLs later served different package contents.

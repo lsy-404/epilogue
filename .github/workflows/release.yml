@@ -21,7 +21,7 @@ jobs:
   build:
     strategy:
       fail-fast: false
-      # 每个受支持目标使用原生架构 runner，npm ci 安装匹配的原生模块（sharp/onnxruntime）。
+      # 每个受支持目标使用原生架构 runner，pnpm install 安装匹配的原生模块（sharp/onnxruntime）。
       matrix:
         include:
           - os: macos-latest
@@ -45,16 +45,19 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          version: 10.34.6
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
-          cache: npm
+          cache: pnpm
 
       - name: Install dependencies
         if: ${{ !(matrix.platform == 'win32' && matrix.arch == 'arm64') }}
         shell: bash
         # Windows runner 偶发 EPERM 文件锁（杀软/索引），重试一次即过
-        run: npm ci --no-audit --no-fund || npm ci --no-audit --no-fund
+        run: pnpm install --frozen-lockfile || pnpm install --frozen-lockfile
 
       - name: Install dependencies (win-arm64)
         if: ${{ matrix.platform == 'win32' && matrix.arch == 'arm64' }}
@@ -62,11 +65,11 @@ jobs:
         # ffmpeg-static 无 win-arm64 二进制：跳过 install scripts（electron 二进制由 packager 自下载、
         # 测试为纯 node），再以 x64 重装 ffmpeg —— ARM Windows 模拟运行 x64 exe，功能完整
         run: |
-          (npm ci --no-audit --no-fund --ignore-scripts || npm ci --no-audit --no-fund --ignore-scripts)
-          npm_config_arch=x64 npm rebuild ffmpeg-static
+          (pnpm install --frozen-lockfile --ignore-scripts || pnpm install --frozen-lockfile --ignore-scripts)
+          npm_config_arch=x64 pnpm rebuild ffmpeg-static
 
       - name: Run tests
-        run: npm test
+        run: pnpm test
 
       - name: Package
         shell: bash
@@ -82,19 +85,30 @@ jobs:
             "dist/installers/Epilogue-${{ github.ref_name }}-darwin-${{ matrix.arch }}.dmg"
 
       # 安装器工具按平台 job 内按需安装（electron-installer-debian 声明仅 darwin/linux，
-      # 放 devDependencies 会让 Windows 的 npm ci 直接 EBADPLATFORM）
+      # 放到项目依赖会在不支持的平台产生安装错误）
       - name: Installer (Windows Setup.exe)
         if: matrix.platform == 'win32'
         shell: bash
         run: |
-          npm i --no-save --no-package-lock electron-winstaller@5.4.4
-          node scripts/installer-win.js ${{ matrix.arch }} ${{ github.ref_name }}
+          tool_dir="$RUNNER_TEMP/epilogue-windows-installer"
+          mkdir -p "$tool_dir"
+          cat > "$tool_dir/package.json" <<'EOF'
+          {"name":"epilogue-release-tools","private":true,"pnpm":{"onlyBuiltDependencies":["electron-winstaller"]}}
+          EOF
+          pnpm --dir "$tool_dir" add --save-exact electron-winstaller@5.4.4
+          NODE_PATH="$tool_dir/node_modules" node scripts/installer-win.js ${{ matrix.arch }} ${{ github.ref_name }}
 
       - name: Installer (Linux deb)
         if: matrix.platform == 'linux'
+        shell: bash
         run: |
-          npm i --no-save --no-package-lock electron-installer-debian@4.0.0
-          node scripts/installer-linux.js ${{ matrix.arch }} ${{ github.ref_name }}
+          tool_dir="$RUNNER_TEMP/epilogue-linux-installer"
+          mkdir -p "$tool_dir"
+          cat > "$tool_dir/package.json" <<'EOF'
+          {"name":"epilogue-release-tools","private":true,"pnpm":{"onlyBuiltDependencies":["electron-installer-debian"]}}
+          EOF
+          pnpm --dir "$tool_dir" add --save-exact electron-installer-debian@4.0.0
+          NODE_PATH="$tool_dir/node_modules" node scripts/installer-linux.js ${{ matrix.arch }} ${{ github.ref_name }}
 
       - name: Resolve release asset and generate SHA-256
         shell: bash

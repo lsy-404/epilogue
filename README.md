@@ -43,9 +43,9 @@ Provider Source 会自动带入上游地址、协议、模型目录和 API Key �
 ## 运行与开发
 
 ```bash
-npm install
-npm start      # 启动应用
-npm test       # 单元测试
+corepack pnpm@10.34.6 install --frozen-lockfile
+pnpm start      # 启动应用
+pnpm test       # 单元测试
 bash scripts/pack.sh [platform] [arch]   # 本地打包
 ```
 
@@ -58,3 +58,7 @@ bash scripts/pack.sh [platform] [arch]   # 本地打包
 - 无遥测、无统计、无回传；所有数据保存在本机，可在应用内查看与清理。
 - 使用 AI 功能时，相关文件内容会发送至**你配置（或内置默认）的服务商**，受其各自隐私政策约束；高度敏感文件请勿使用 AI 功能。
 - 许可：**ALE 1.1（反劳动剥削许可证，优先适用）& GPL-3.0**——GPL 权利以 ALE 合规为条件，ALE 的约束主要作用于商业与用工实体。条款与许可证全文均内置于应用（设置 → 关于）。
+
+### 固定的 model-auth 依赖
+
+`@model-auth/core`、`@model-auth/providers` 和 `@model-auth/vue` 使用 `vendor/model-auth/` 中固定的本地归档，确保安装内容可重复。它们保留原锁文件中 SHA-512 校验的归档内容；上游相同下载地址后来提供了不同版本的内容。
