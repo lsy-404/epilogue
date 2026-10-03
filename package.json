@@ -33,6 +33,10 @@
       "adm-zip": "$adm-zip",
       "pdfjs-dist": "$pdfjs-dist",
       "sharp": "0.35.4"
-    }
+    },
+    "onlyBuiltDependencies": [
+      "ffmpeg-static",
+      "onnxruntime-node"
+    ]
   }
 }
