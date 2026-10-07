@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const manifest = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
 const lock = await readFile(path.join(root, "pnpm-lock.yaml"), "utf8");
+const legacyVendor = path.join(root, "vendor", "model-auth");
+assert.equal((await readdir(legacyVendor).catch(() => [])).length, 0);
 for (const [name, version] of [["core", "0.9.0"], ["providers", "0.13.0"], ["vue", "0.10.3"]]) {
   const dependency = `https://github.com/lsy-404/platform-kit/releases/download/model-auth-${name}-v${version}/model-auth-${name}-${version}.tgz`;
   assert.equal(manifest.dependencies[`@model-auth/${name}`], dependency);

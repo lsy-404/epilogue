@@ -1,6 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const path = require('node:path');
 const trae = require('../src/main/trae');
 function fixtureStore() {
   const files = new Map();
@@ -12,7 +13,7 @@ test('TRAE stores the full browser credential encrypted while exposing sanitized
   const { store, files } = fixtureStore();
   const account = store.save({ access: 'access-secret', refresh: 'refresh-secret', expires: Date.now() + 3600000, host: 'https://www.trae.ai', device: { privateKeyPem: 'private-secret' }, accountId: 'person' });
   assert.deepEqual(Object.keys(account).sort(), ['accountId', 'expires', 'host', 'id', 'label', 'region']);
-  assert.doesNotMatch(files.get('/profile/trae-oauth-accounts.json'), /access-secret|refresh-secret|private-secret/);
+  assert.doesNotMatch(files.get(path.join('/profile', 'trae-oauth-accounts.json')), /access-secret|refresh-secret|private-secret/);
   assert.equal(store.remove(account.id), true);
 });
 test('TRAE refuses tool definitions and tool history rather than dropping them', async () => {
