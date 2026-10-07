@@ -240,12 +240,22 @@ function isPathInside(root, candidate) {
 
 function resolveMoveDestination(destination, subfolder, destinations) {
   const target = String(destination || '');
-  const roots = (destinations || []).map((root) => path.resolve(String(root || ''))).filter(Boolean);
-  if (!roots.some((root) => path.resolve(target) === root)) throw new Error('目标文件夹不在已配置的归类目标内');
+  const roots = (destinations || [])
+    .map((root) => String(root || '').trim())
+    .filter(Boolean)
+    .map((root) => path.resolve(root));
+  const targetRoot = roots.find((root) => path.resolve(target) === root);
+  if (!targetRoot) throw new Error('目标文件夹不在已配置的归类目标内');
   const folder = String(subfolder || '');
   const resolved = path.resolve(target, folder);
-  if (!roots.some((root) => isPathInside(root, resolved))) throw new Error('子文件夹不能越出归类目标');
+  if (!isPathInside(targetRoot, resolved)) throw new Error('子文件夹不能越出归类目标');
   return resolved;
+}
+
+function assertPhysicalDestination(destDir, configuredRoot) {
+  const physicalRoot = fs.realpathSync(configuredRoot);
+  const physicalDir = fs.realpathSync(destDir);
+  if (!isPathInside(physicalRoot, physicalDir)) throw new Error('子文件夹不能越出归类目标');
 }
 
 // moves: [{filePath, destination, subfolder, trash?}] → 实际移动/移入回收站，返回 [{filePath, newPath?, trashed?, error?}]
@@ -283,6 +293,7 @@ async function applyMoves(moves, store, options = {}) {
       }
       const destDir = resolveMoveDestination(m.destination, m.subfolder, destinations);
       fs.mkdirSync(destDir, { recursive: true });
+      assertPhysicalDestination(destDir, path.resolve(m.destination));
       const newPath = uniqueDest(destDir, path.basename(m.filePath));
       const operation = journal.stage(transaction.id, { kind: 'move', from: m.filePath, to: newPath });
       try {

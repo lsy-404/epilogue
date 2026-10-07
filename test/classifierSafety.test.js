@@ -77,3 +77,50 @@ test('applyMoves permits a nested configured destination and updates the index',
   assert.deepEqual(updates, [[source, target]]);
   assert.equal(fs.readFileSync(target, 'utf8'), 'move');
 });
+
+test('applyMoves keeps a subfolder inside the selected root when another root is configured', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'epilogue-classifier-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const source = path.join(root, 'source.txt');
+  const first = path.join(root, 'first');
+  const second = path.join(root, 'second');
+  fs.mkdirSync(first);
+  fs.mkdirSync(second);
+  fs.writeFileSync(source, 'keep');
+  const classifier = loadClassifier(['', first, second]);
+  const [result] = await classifier.applyMoves(
+    [{ filePath: source, destination: first, subfolder: `..${path.sep}second` }],
+    { updatePath() {} },
+    { journal: journalStub() },
+  );
+  assert.match(result.error, /子文件夹/);
+  assert.equal(fs.existsSync(source), true);
+  assert.equal(fs.existsSync(path.join(second, 'source.txt')), false);
+});
+
+test('applyMoves rejects an existing symlink that escapes the selected root', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'epilogue-classifier-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const source = path.join(root, 'source.txt');
+  const allowed = path.join(root, 'allowed');
+  const outside = path.join(root, 'outside');
+  const escape = path.join(allowed, 'escape');
+  fs.mkdirSync(allowed);
+  fs.mkdirSync(outside);
+  fs.writeFileSync(source, 'keep');
+  try {
+    fs.symlinkSync(outside, escape, 'junction');
+  } catch (error) {
+    if (['EPERM', 'EACCES', 'UNKNOWN'].includes(error.code)) return;
+    throw error;
+  }
+  const classifier = loadClassifier([allowed]);
+  const [result] = await classifier.applyMoves(
+    [{ filePath: source, destination: allowed, subfolder: 'escape' }],
+    { updatePath() {} },
+    { journal: journalStub() },
+  );
+  assert.match(result.error, /子文件夹/);
+  assert.equal(fs.existsSync(source), true);
+  assert.equal(fs.existsSync(path.join(outside, 'source.txt')), false);
+});
