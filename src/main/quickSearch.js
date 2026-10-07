@@ -30,7 +30,7 @@ function createQuickSearch({ openWindow, getMainWindow }) {
     handlersRegistered = true;
     ipcMain.handle('quick-search:state', (event) => {
       if (!owns(event)) throw new Error('Rejected untrusted quick-search sender');
-      return { language: settings.get().language, tosAccepted: settings.get().tosAccepted === true, shortcut: DEFAULT_ACCELERATOR, shortcutRegistered: registered };
+      return { language: settings.get().language, platform: process.platform, tosAccepted: settings.get().tosAccepted === true, shortcut: DEFAULT_ACCELERATOR, shortcutRegistered: registered };
     });
     ipcMain.handle('quick-search:query', async (event, query) => {
       if (!owns(event)) throw new Error('Rejected untrusted quick-search sender');

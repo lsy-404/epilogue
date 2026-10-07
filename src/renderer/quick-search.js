@@ -6,11 +6,12 @@
   const status = document.getElementById('status');
   const shortcut = document.getElementById('shortcut');
   const close = document.getElementById('close');
+  const keyboardHints = document.getElementById('keyboard-hints');
   let hits = [];
   let selected = 0;
   let sequence = 0;
   let timer = null;
-  let copy = { empty: '没有匹配文件', loading: '搜索中…', error: '搜索失败，请重试', shortcut: 'Ctrl / Cmd + Shift + Space' };
+  let copy = { empty: '没有匹配文件', loading: '搜索中…', error: '搜索失败，请重试', shortcut: 'Ctrl+Shift+Space', hints: '↑↓ 选择 · Enter 打开 · Shift+Enter 定位 · Esc 关闭', close: '关闭', input: '搜索已索引文件' };
 
   function render() {
     results.textContent = '';
@@ -70,8 +71,12 @@
 
   api.state().then((state) => {
     document.documentElement.lang = state.language || 'zh';
-    if (state.language === 'en') copy = { empty: 'No matching files', loading: 'Searching…', error: 'Search failed. Try again.', shortcut: 'Ctrl / Cmd + Shift + Space' };
+    if (state.language === 'en') copy = { empty: 'No matching files', loading: 'Searching…', error: 'Search failed. Try again.', shortcut: state.platform === 'darwin' ? '⌘⇧Space' : 'Ctrl+Shift+Space', hints: '↑↓ Select · Enter Open · Shift+Enter Reveal · Esc Close', close: 'Close', input: 'Search indexed files' };
+    else if (state.platform === 'darwin') copy.shortcut = '⌘⇧Space';
     shortcut.textContent = state.shortcutRegistered ? copy.shortcut : `${copy.shortcut} · unavailable`;
+    keyboardHints.textContent = copy.hints;
+    close.setAttribute('aria-label', copy.close);
+    query.setAttribute('aria-label', copy.input);
     query.placeholder = state.language === 'en' ? 'Search indexed files…' : '搜索已索引文件…';
     query.focus();
   }).catch(() => query.focus());
