@@ -14,9 +14,9 @@
   "dependencies": {
     "@ai-sdk/openai-compatible": "^2.0.73",
     "@huggingface/transformers": "^4.2.0",
-    "@model-auth/core": "file:vendor/model-auth/core-0.3.0.tgz",
-    "@model-auth/providers": "file:vendor/model-auth/providers-0.3.0.tgz",
-    "@model-auth/vue": "file:vendor/model-auth/vue-0.4.1.tgz",
+    "@model-auth/core": "https://github.com/lsy-404/platform-kit/releases/download/model-auth-core-v0.9.0/model-auth-core-0.9.0.tgz",
+    "@model-auth/providers": "https://github.com/lsy-404/platform-kit/releases/download/model-auth-providers-v0.13.0/model-auth-providers-0.13.0.tgz",
+    "@model-auth/vue": "https://github.com/lsy-404/platform-kit/releases/download/model-auth-vue-v0.10.3/model-auth-vue-0.10.3.tgz",
     "adm-zip": "^0.6.0",
     "ai": "^6.0.271",
     "ffmpeg-static": "^5.2.0",

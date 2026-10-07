@@ -16,6 +16,7 @@ function actionFor(event) {
   const detail = Array.isArray(event.detail) ? event.detail : [event.detail];
   if (event.type === 'authorize-oauth') return { type: event.type, providerId: detail[0], ...(detail[1] ? { credentialId: detail[1] } : {}) };
   if (event.type === 'add-api-key' || event.type === 'update-credential' || event.type === 'update-provider' || event.type === 'select-model' || event.type === 'update-provider-strategy') return { type: event.type, payload: detail[0] };
+  if (event.type === 'reorder-credentials') return { type: event.type, ...detail[0] };
   if (event.type === 'remove-credential') return { type: event.type, ...detail[0] };
   return { type: event.type };
 }
@@ -64,7 +65,7 @@ panel?.addEventListener('refresh', () => {
   void refresh().catch(() => { panel.error = 'Could not load model connections. Try again.'; });
 });
 void refresh().catch(() => { if (panel) panel.error = 'Could not load model connections. Try again.'; });
-for (const type of ['authorize-oauth', 'add-api-key', 'remove-credential', 'update-credential', 'update-provider', 'select-model', 'update-provider-strategy', 'refresh-catalog']) dialog.addEventListener(type, perform);
+for (const type of ['authorize-oauth', 'add-api-key', 'remove-credential', 'update-credential', 'reorder-credentials', 'update-provider', 'select-model', 'update-provider-strategy', 'refresh-catalog']) dialog.addEventListener(type, perform);
 dialog.addEventListener('reconnect-oauth', (event) => perform(new CustomEvent('authorize-oauth', { detail: event.detail })));
 dialog.addEventListener('remove-oauth', (event) => {
   const [providerId, credentialId] = Array.isArray(event.detail) ? event.detail : [];

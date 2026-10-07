@@ -48,3 +48,37 @@ test('real host state exposes all OAuth entries and uniquely merges built-in API
     }
   } finally { Module._load = load; delete require.cache[entry]; }
 });
+
+
+test('current kit credential edits and order persist without weight input', async () => {
+  const entry = require.resolve('../src/main/modelAuth');
+  const load = Module._load;
+  let config = { providers: { chat: [
+    { id: 'first', name: 'First', source: { provider: 'anthropic' }, apiKey: 'fixture-secret', enabled: true },
+    { id: 'second', name: 'Second', source: { provider: 'anthropic' }, apiKey: 'fixture-other', enabled: true },
+  ] } };
+  delete require.cache[entry];
+  Module._load = function(request, parent, main) {
+    if (parent?.filename === entry) {
+      if (request === './settings') return { get: () => config, set: patch => { config = { ...config, ...patch }; } };
+      if (request === './providerOAuth') return { listAccounts: () => [] };
+      if (request === './providerCatalog') return { getCatalog: async () => ({ providers: [] }) };
+      if (request === './trae') return { store: () => ({ list: () => [], status: async () => ({ authenticated: false }) }), models: async () => [] };
+    }
+    return load.apply(this, arguments);
+  };
+  try {
+    const host = require(entry);
+    await host.execute({ type: 'update-credential', payload: { providerId: 'catalog:anthropic', credentialId: 'first', enabled: false, label: 'Renamed', extend: { team: 'class' } } });
+    await host.execute({ type: 'reorder-credentials', providerId: 'catalog:anthropic', method: 'api-key', credentialIds: ['second', 'first'] });
+    const provider = (await host.state()).providers.find(item => item.id === 'catalog:anthropic');
+    assert.deepEqual(provider.apiKeyCredentials.map(item => item.id), ['second', 'first']);
+    assert.equal(provider.apiKeyCredentials[1].label, 'Renamed');
+    assert.equal(provider.apiKeyCredentials[1].enabled, false);
+    assert.deepEqual(provider.apiKeyCredentials[1].extend, { team: 'class' });
+    assert.doesNotMatch(JSON.stringify(provider), /fixture-secret|fixture-other/);
+    await assert.rejects(host.execute({ type: 'reorder-credentials', providerId: 'catalog:anthropic', method: 'api-key', credentialIds: ['first', 'first'] }));
+    await assert.rejects(host.execute({ type: 'update-credential', payload: { providerId: 'catalog:openai', credentialId: 'first', enabled: true } }));
+    assert.deepEqual(config.providers.chat.map(item => item.id), ['second', 'first']);
+  } finally { Module._load = load; delete require.cache[entry]; }
+});

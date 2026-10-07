@@ -20,14 +20,14 @@ importers:
         specifier: ^4.2.0
         version: 4.2.0
       '@model-auth/core':
-        specifier: file:vendor/model-auth/core-0.3.0.tgz
-        version: file:vendor/model-auth/core-0.3.0.tgz
+        specifier: https://github.com/lsy-404/platform-kit/releases/download/model-auth-core-v0.9.0/model-auth-core-0.9.0.tgz
+        version: https://github.com/lsy-404/platform-kit/releases/download/model-auth-core-v0.9.0/model-auth-core-0.9.0.tgz
       '@model-auth/providers':
-        specifier: file:vendor/model-auth/providers-0.3.0.tgz
-        version: file:vendor/model-auth/providers-0.3.0.tgz
+        specifier: https://github.com/lsy-404/platform-kit/releases/download/model-auth-providers-v0.13.0/model-auth-providers-0.13.0.tgz
+        version: https://github.com/lsy-404/platform-kit/releases/download/model-auth-providers-v0.13.0/model-auth-providers-0.13.0.tgz(@model-auth/core@https://github.com/lsy-404/platform-kit/releases/download/model-auth-core-v0.9.0/model-auth-core-0.9.0.tgz)
       '@model-auth/vue':
-        specifier: file:vendor/model-auth/vue-0.4.1.tgz
-        version: file:vendor/model-auth/vue-0.4.1.tgz(vue@3.5.42)
+        specifier: https://github.com/lsy-404/platform-kit/releases/download/model-auth-vue-v0.10.3/model-auth-vue-0.10.3.tgz
+        version: https://github.com/lsy-404/platform-kit/releases/download/model-auth-vue-v0.10.3/model-auth-vue-0.10.3.tgz(vue@3.5.42)
       adm-zip:
         specifier: ^0.6.0
         version: 0.6.0
@@ -320,18 +320,20 @@ packages:
     resolution: {integrity: sha512-1DpKU0Z5ThltBwjNySMC14g0CkbyhCaz9FkhxqNsZI6uAPJXFS8cMXlBKo26FJ8ZuW6S9GCMcR9IO5k2X5/9Fg==}
     engines: {node: '>= 12.13.0'}
 
-  '@model-auth/core@file:vendor/model-auth/core-0.3.0.tgz':
-    resolution: {integrity: sha512-KODgW7SCroj0pCdHUPJ9gsTNXKCuHtI1rwPg1hwYLF/v/dvlxrDrNkl9kqzktbgZgw2PNwagnP3k4HGBBMVK/A==, tarball: file:vendor/model-auth/core-0.3.0.tgz}
-    version: 0.3.0
+  '@model-auth/core@https://github.com/lsy-404/platform-kit/releases/download/model-auth-core-v0.9.0/model-auth-core-0.9.0.tgz':
+    resolution: {integrity: sha512-lj3xxwivK5j75jHOCnmgDXGH/oQSvj2Oe/RkB9h297mUXMpkOZfPk9V0GDnd+rQKZs7O+iKuQFIW8s/tgLe5ng==, tarball: https://github.com/lsy-404/platform-kit/releases/download/model-auth-core-v0.9.0/model-auth-core-0.9.0.tgz}
+    version: 0.9.0
 
-  '@model-auth/providers@file:vendor/model-auth/providers-0.3.0.tgz':
-    resolution: {integrity: sha512-0vsIDF/Pop74cBaZiDWorvy5lJrliWIgcbfqKSVPMlFp7MvFVebE9S3vYeSLvnQYGmOkOdW0irbba/E5lm1Kpw==, tarball: file:vendor/model-auth/providers-0.3.0.tgz}
-    version: 0.3.0
+  '@model-auth/providers@https://github.com/lsy-404/platform-kit/releases/download/model-auth-providers-v0.13.0/model-auth-providers-0.13.0.tgz':
+    resolution: {integrity: sha512-LwqhFJSlG0aovVHhAaUW6ZJtwzA65e/rXTP9gEYcxryvaByEH3KRpelYssiUPM33dTUMEK7alm+4/rX0l1qNGg==, tarball: https://github.com/lsy-404/platform-kit/releases/download/model-auth-providers-v0.13.0/model-auth-providers-0.13.0.tgz}
+    version: 0.13.0
     engines: {node: '>=20.19'}
+    peerDependencies:
+      '@model-auth/core': ^0.9.0
 
-  '@model-auth/vue@file:vendor/model-auth/vue-0.4.1.tgz':
-    resolution: {integrity: sha512-n8jhndps84dKgQVZgkmR4hg9v/Et58GgWOWbPB3BZz2IKh+kZ25QmjNn0dXXPwdxipX+hs87sBKIw97XlyJCzg==, tarball: file:vendor/model-auth/vue-0.4.1.tgz}
-    version: 0.4.1
+  '@model-auth/vue@https://github.com/lsy-404/platform-kit/releases/download/model-auth-vue-v0.10.3/model-auth-vue-0.10.3.tgz':
+    resolution: {integrity: sha512-F6tseNpcpsvm6W5FC/nF0ekeU7Tjj2c+JtAbQSYr9Zedq5r6oBUmUqDryw/xP/gAlt4C3I+1i+GJY4DW4uR8FA==, tarball: https://github.com/lsy-404/platform-kit/releases/download/model-auth-vue-v0.10.3/model-auth-vue-0.10.3.tgz}
+    version: 0.10.3
     peerDependencies:
       vue: ^3.5.0
 
@@ -1241,13 +1243,14 @@ snapshots:
     dependencies:
       cross-spawn: 7.0.6
 
-  '@model-auth/core@file:vendor/model-auth/core-0.3.0.tgz': {}
+  '@model-auth/core@https://github.com/lsy-404/platform-kit/releases/download/model-auth-core-v0.9.0/model-auth-core-0.9.0.tgz': {}
 
-  '@model-auth/providers@file:vendor/model-auth/providers-0.3.0.tgz':
+  '@model-auth/providers@https://github.com/lsy-404/platform-kit/releases/download/model-auth-providers-v0.13.0/model-auth-providers-0.13.0.tgz(@model-auth/core@https://github.com/lsy-404/platform-kit/releases/download/model-auth-core-v0.9.0/model-auth-core-0.9.0.tgz)':
     dependencies:
+      '@model-auth/core': https://github.com/lsy-404/platform-kit/releases/download/model-auth-core-v0.9.0/model-auth-core-0.9.0.tgz
       tough-cookie: 6.0.2
 
-  '@model-auth/vue@file:vendor/model-auth/vue-0.4.1.tgz(vue@3.5.42)':
+  '@model-auth/vue@https://github.com/lsy-404/platform-kit/releases/download/model-auth-vue-v0.10.3/model-auth-vue-0.10.3.tgz(vue@3.5.42)':
     dependencies:
       vue: 3.5.42
 

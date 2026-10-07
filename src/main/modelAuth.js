@@ -139,7 +139,20 @@ async function state() {
       }),
     };
   });
-  return { providers: [...oauthProviders, await traeProvider(records), ...apiProviders, ...savedApiProviders], model: cfg.modelAuthSelection || null, catalogStatus };
+  const providers = [...oauthProviders, await traeProvider(records), ...apiProviders, ...savedApiProviders];
+  for (const provider of providers) {
+    for (const [field, method] of [['oauthCredentials', 'oauth'], ['apiKeyCredentials', 'api-key']]) {
+      const saved = records.filter(record => routeId(record) === provider.id && (record.authType === 'oauth' || record.protocol === 'trae' ? 'oauth' : 'api-key') === method);
+      const positions = new Map(saved.map((record, index) => [credentialId(record), index]));
+      for (const credential of provider[field] || []) {
+        const record = saved.find(item => credentialId(item) === credential.id);
+        if (record?.name) credential.label = record.name;
+        if (record?.extend) credential.extend = record.extend;
+      }
+      provider[field]?.sort((left, right) => (positions.get(left.id) ?? saved.length) - (positions.get(right.id) ?? saved.length));
+    }
+  }
+  return { providers, model: cfg.modelAuthSelection || null, catalogStatus };
 }
 
 function updateRecords(providerId, credential, update) {
@@ -213,9 +226,32 @@ async function execute(action, { signal } = {}) {
     return;
   }
   if (action?.type === 'update-credential') {
-    const weight = Number(action.payload.weight);
-    if (!Number.isInteger(weight) || weight < 1 || weight > 100) throw new Error('Invalid credential weight.');
-    updateRecords(providerId, String(action.payload.credentialId), { enabled: action.payload.enabled === true, weight }); return;
+    const id = String(action.payload.credentialId);
+    const record = (settings.get().providers.chat || []).find(item => routeId(item) === providerId && credentialId(item) === id);
+    if (!record) throw new Error('Credential was not found.');
+    const update = { enabled: action.payload.enabled === true };
+    if (action.payload.label !== undefined) {
+      const label = String(action.payload.label).trim();
+      if (!label || label.length > 80) throw new Error('Credential label must contain 1 to 80 characters.');
+      update.name = label;
+    }
+    if (action.payload.extend !== undefined) {
+      const extend = action.payload.extend;
+      if (!extend || Array.isArray(extend) || typeof extend !== 'object' || Object.values(extend).some(value => value !== null && !['string', 'number', 'boolean'].includes(typeof value))) throw new Error('Credential metadata must contain scalar values.');
+      update.extend = extend;
+    }
+    updateRecords(providerId, id, update); return;
+  }
+  if (action?.type === 'reorder-credentials') {
+    if (!['oauth', 'api-key'].includes(action.method)) throw new Error('Invalid authentication method.');
+    const cfg = settings.get();
+    const matches = record => routeId(record) === providerId && (record.authType === 'oauth' || record.protocol === 'trae' ? 'oauth' : 'api-key') === action.method;
+    const group = (cfg.providers.chat || []).filter(matches);
+    const ids = action.credentialIds;
+    if (!Array.isArray(ids) || group.length !== ids.length || new Set(ids).size !== ids.length || ids.some(id => !group.some(record => credentialId(record) === id))) throw new Error('Credential order must include every credential exactly once.');
+    group.sort((left, right) => ids.indexOf(credentialId(left)) - ids.indexOf(credentialId(right)));
+    let index = 0;
+    settings.set({ providers: { chat: (cfg.providers.chat || []).map(record => matches(record) ? group[index++] : record) } }); return;
   }
   if (action?.type === 'update-provider') { updateRouting(providerId, { oauthEnabled: action.payload.oauthEnabled === true }); return; }
   if (action?.type === 'update-strategy' || action?.type === 'update-provider-strategy') {
