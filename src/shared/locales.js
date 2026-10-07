@@ -5,7 +5,7 @@ const LOCALES = {
     // 导航
     nav_overview: '总览', nav_cleanup: '清理', nav_recall: '寻物', nav_assistant: '助手', nav_settings: '设置',
     // 托盘 / 通知
-    tray_open: '打开 Epilogue', tray_scan: '立即扫描过期文件', tray_quit: '退出',
+    tray_open: '打开 Epilogue', tray_search: '快捷搜索', tray_scan: '立即扫描过期文件', tray_quit: '退出',
     tray_tooltip: 'Epilogue — files, remembered',
     notif_found: '发现 {n} 个过期文件待整理',
     // 总览
@@ -140,7 +140,7 @@ const LOCALES = {
   },
   en: {
     nav_overview: 'Overview', nav_cleanup: 'Cleanup', nav_recall: 'Recall', nav_assistant: 'Assistant', nav_settings: 'Settings',
-    tray_open: 'Open Epilogue', tray_scan: 'Scan stale files now', tray_quit: 'Quit',
+    tray_open: 'Open Epilogue', tray_search: 'Quick search', tray_scan: 'Scan stale files now', tray_quit: 'Quit',
     tray_tooltip: 'Epilogue — files, remembered',
     notif_found: '{n} stale file(s) found to organize',
     desc_overview: 'Your files — remembered, understood, at your call.',

@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self';">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="quick-search.css">
+</head>
+<body>
+  <main class="panel">
+    <div class="topline"><span class="brand">Epilogue</span><button id="close" type="button" aria-label="关闭">×</button></div>
+    <input id="query" autofocus autocomplete="off" spellcheck="false" aria-label="搜索已索引文件" placeholder="搜索已索引文件…">
+    <div id="status" class="status" aria-live="polite"></div>
+    <ul id="results" role="listbox"></ul>
+    <div class="actions"><span id="shortcut" class="hint"></span><span class="hint">↑↓ 选择 · Enter 打开 · Shift+Enter 定位 · Esc 关闭</span></div>
+  </main>
+  <script src="quick-search.js"></script>
+</body>
+</html>
