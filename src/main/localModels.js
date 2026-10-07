@@ -138,7 +138,12 @@ function applyHostSettings(cfg) {
 
 /* ---------- 支持文件状态/删除（纯 fs，主进程） ---------- */
 function modelDirs(model) {
+  if (!isSafeModelId(model)) return [];
   return [path.join(cacheDir(), model), path.join(cacheDir(), `models--${model.replace('/', '--')}`)];
+}
+
+function isSafeModelId(model) {
+  return typeof model === 'string' && /^[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._-]*$/.test(model);
 }
 
 function dirSize(dir) {
@@ -227,5 +232,5 @@ function clipTextEmbed(texts, model) {
 
 module.exports = {
   status, download, remove, embed, transcribe, extractRemote, imageEmbed, clipTextEmbed,
-  restartHost, idleShutdown, cancelIdleShutdown, applyHostSettings, dirHasOnnx, WHISPER_QUALITY, DEFAULT_EMBED_MODEL,
+  restartHost, idleShutdown, cancelIdleShutdown, applyHostSettings, dirHasOnnx, isSafeModelId, WHISPER_QUALITY, DEFAULT_EMBED_MODEL,
 };

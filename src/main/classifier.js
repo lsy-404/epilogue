@@ -233,11 +233,27 @@ function uniqueDest(dir, fileName) {
   return candidate;
 }
 
+function isPathInside(root, candidate) {
+  const relative = path.relative(path.resolve(root), path.resolve(candidate));
+  return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+}
+
+function resolveMoveDestination(destination, subfolder, destinations) {
+  const target = String(destination || '');
+  const roots = (destinations || []).map((root) => path.resolve(String(root || ''))).filter(Boolean);
+  if (!roots.some((root) => path.resolve(target) === root)) throw new Error('目标文件夹不在已配置的归类目标内');
+  const folder = String(subfolder || '');
+  const resolved = path.resolve(target, folder);
+  if (!roots.some((root) => isPathInside(root, resolved))) throw new Error('子文件夹不能越出归类目标');
+  return resolved;
+}
+
 // moves: [{filePath, destination, subfolder, trash?}] → 实际移动/移入回收站，返回 [{filePath, newPath?, trashed?, error?}]
 async function applyMoves(moves, store, options = {}) {
   const { log } = require('./log');
   const results = [];
   const journal = options.journal || getOperationJournal();
+  const destinations = settings.get().destinations;
   // The transaction itself is persisted before any filesystem mutation.
   // Each operation is then staged with its exact destination and checkpointed
   // after success, leaving enough information to recover from a mid-batch stop.
@@ -265,7 +281,7 @@ async function applyMoves(moves, store, options = {}) {
         results.push({ filePath: m.filePath, trashed: true, transactionId: transaction.id, undoable: false });
         continue;
       }
-      const destDir = m.subfolder ? path.join(m.destination, m.subfolder) : m.destination;
+      const destDir = resolveMoveDestination(m.destination, m.subfolder, destinations);
       fs.mkdirSync(destDir, { recursive: true });
       const newPath = uniqueDest(destDir, path.basename(m.filePath));
       const operation = journal.stage(transaction.id, { kind: 'move', from: m.filePath, to: newPath });

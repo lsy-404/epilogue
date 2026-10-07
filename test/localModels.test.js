@@ -264,3 +264,15 @@ test('an old host exit does not clear or reject a request sent to its replacemen
     fixture.restore();
   }
 });
+
+test('model cache paths reject traversal-shaped model ids', () => {
+  const fixture = loadLocalModels();
+  try {
+    assert.equal(fixture.localModels.isSafeModelId('Xenova/whisper-tiny'), true);
+    assert.equal(fixture.localModels.isSafeModelId('../outside'), false);
+    assert.equal(fixture.localModels.isSafeModelId('Xenova/../../outside'), false);
+    assert.deepEqual(fixture.localModels.status('../outside'), { downloaded: false, sizeBytes: 0 });
+  } finally {
+    fixture.restore();
+  }
+});

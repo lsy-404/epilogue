@@ -60,7 +60,7 @@ async function soloProcess(found) {
     if (!records.length) return 0;
     const suggestions = await classifier.suggest(records);
     const moves = suggestions
-      .filter((s) => s.trash === true || (s.move !== false && s.destination))
+      .filter((s) => s.trash === true || (s.move === true && s.destination))
       .map((s) => ({ filePath: s.filePath, destination: s.destination, subfolder: s.subfolder || '', trash: s.trash === true }));
     if (!moves.length) return 0;
     const results = await classifier.applyMoves(moves, store, { source: 'solo' });
