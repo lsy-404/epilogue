@@ -7,8 +7,8 @@ const test = require('node:test');
 
 const schedulerPath = path.resolve(__dirname, '../src/main/scheduler.js');
 
-function loadScheduler(config, found) {
-  const calls = { acquired: 0, released: 0, indexed: 0, soloIndexed: 0 };
+function loadScheduler(config, found, suggestions = []) {
+  const calls = { acquired: 0, released: 0, indexed: 0, soloIndexed: 0, applied: 0 };
   const store = { get: () => undefined };
   const originalLoad = Module._load;
   Module._load = function mockedLoad(request, parent, isMain) {
@@ -34,7 +34,10 @@ function loadScheduler(config, found) {
         indexDestinations: async () => { calls.indexed++; },
         indexFile: async () => { calls.soloIndexed++; return { filePath: found[0].filePath }; },
       };
-      if (request === './classifier') return { suggest: async () => [] };
+      if (request === './classifier') return {
+        suggest: async () => suggestions,
+        applyMoves: async (moves) => { calls.applied += moves.length; return moves.map((m) => ({ filePath: m.filePath, newPath: m.destination })); },
+      };
       if (request === '../shared/locales') return { makeT: () => () => '' };
     }
     return originalLoad.call(this, request, parent, isMain);
@@ -58,7 +61,7 @@ test('automatic destination indexing retains the store until its background task
   t.after(dispose);
   assert.deepEqual(scheduler.tick(true), []);
   await tickDone();
-  assert.deepEqual(calls, { acquired: 1, released: 1, indexed: 1, soloIndexed: 0 });
+  assert.deepEqual(calls, { acquired: 1, released: 1, indexed: 1, soloIndexed: 0, applied: 0 });
 });
 
 test('solo processing retains the store for the entire indexing workflow', async (t) => {
@@ -69,5 +72,18 @@ test('solo processing retains the store for the entire indexing workflow', async
   t.after(dispose);
   assert.deepEqual(scheduler.tick(true), found);
   await tickDone();
-  assert.deepEqual(calls, { acquired: 1, released: 1, indexed: 0, soloIndexed: 1 });
+  assert.deepEqual(calls, { acquired: 1, released: 1, indexed: 0, soloIndexed: 1, applied: 0 });
+});
+
+test('solo mode requires an explicit move decision from the classifier', async (t) => {
+  const found = [{ filePath: '/files/old.txt', fileName: 'old.txt' }];
+  const { scheduler, calls, dispose } = loadScheduler(
+    { cleanup: { autoScan: true, soloMode: true }, destIndex: { enabled: false }, language: 'en' },
+    found,
+    [{ filePath: found[0].filePath, destination: '/archive' }],
+  );
+  t.after(dispose);
+  scheduler.tick(true);
+  await tickDone();
+  assert.equal(calls.applied, 0);
 });
