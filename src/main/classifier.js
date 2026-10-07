@@ -252,9 +252,19 @@ function resolveMoveDestination(destination, subfolder, destinations) {
   return resolved;
 }
 
+function physicalPath(filePath) {
+  let existing = path.resolve(filePath);
+  while (!fs.existsSync(existing)) {
+    const parent = path.dirname(existing);
+    if (parent === existing) break;
+    existing = parent;
+  }
+  return path.resolve(fs.realpathSync(existing), path.relative(existing, path.resolve(filePath)));
+}
+
 function assertPhysicalDestination(destDir, configuredRoot) {
-  const physicalRoot = fs.realpathSync(configuredRoot);
-  const physicalDir = fs.realpathSync(destDir);
+  const physicalRoot = physicalPath(configuredRoot);
+  const physicalDir = physicalPath(destDir);
   if (!isPathInside(physicalRoot, physicalDir)) throw new Error('子文件夹不能越出归类目标');
 }
 
@@ -292,6 +302,7 @@ async function applyMoves(moves, store, options = {}) {
         continue;
       }
       const destDir = resolveMoveDestination(m.destination, m.subfolder, destinations);
+      assertPhysicalDestination(destDir, path.resolve(m.destination));
       fs.mkdirSync(destDir, { recursive: true });
       assertPhysicalDestination(destDir, path.resolve(m.destination));
       const newPath = uniqueDest(destDir, path.basename(m.filePath));
