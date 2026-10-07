@@ -105,6 +105,7 @@ function openWindow(view) {
 }
 
 function applyAppSettings(cfg) {
+  quickSearch?.applyShortcut(cfg.app?.quickSearchShortcut);
   try {
     // Electron 44 removed the legacy macOS hidden-login option. macOS reports an automatic launch
     // through wasOpenedAtLogin; Windows keeps an explicit marker argument.
@@ -184,7 +185,7 @@ app.whenReady().then(() => {
 
   if (!settings.get().stats.firstRunAt) settings.set({ stats: { firstRunAt: Date.now() } });
   settings.seedCleanupFolders(); // 识别 下载/桌面 → 添加为未启用条目（存量用户；新用户在 folders:detect 后）
-  ipc.register(() => win, { onSettingsChanged: applyAppSettings });
+  ipc.register(() => win, { onSettingsChanged: applyAppSettings, getQuickSearchStatus: () => quickSearch?.status?.() });
   quickSearch = createQuickSearch({ openWindow, getMainWindow: () => win });
   quickSearch.start();
   createTray();

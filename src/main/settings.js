@@ -41,6 +41,7 @@ const DEFAULTS = {
     allowTrash: false, // 允许 AI 将明显无价值的临时文件移入系统回收站 —— 仅可由用户手动开启
   },
   app: {
+    quickSearchShortcut: 'CommandOrControl+Shift+Space',
     launchAtLogin: false,
     trayKeepAlive: true, // 关闭窗口驻留托盘而非退出
     lowPower: true, // 低占用：低进程优先级；保留 UI 的 GPU 合成，电池模式降速并跳过转写

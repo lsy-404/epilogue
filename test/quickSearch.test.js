@@ -13,7 +13,8 @@ function load(overrides = {}) {
   const store = { all: () => [], get: (p) => p === file ? { filePath: p } : null };
   const ipc = { resumeStore() {}, unloadStore: () => counters.unload++, withStore: async (fn) => fn(store) };
   const shell = { openPath: async () => overrides.openError || '', showItemInFolder: () => counters.reveal++ };
-  const shortcut = { register: () => overrides.shortcut ?? true, unregister() {} };
+  const shortcutCalls = { register: [], unregister: [] };
+  const shortcut = { register: (key) => { shortcutCalls.register.push(key); return overrides.shortcut ?? true; }, unregister: (key) => shortcutCalls.unregister.push(key) };
   class FakeWindow extends EventEmitter {
     constructor() { super(); this.destroyed = false; this.webContents = new EventEmitter(); this.webContents.mainFrame = 'main-frame'; this.webContents.setWindowOpenHandler = (fn) => { this.windowOpenHandler = fn; }; this.webContents.send = () => {}; windows.push(this); }
     isDestroyed() { return this.destroyed; } setMenuBarVisibility() {} loadFile() {} show() {} focus() { counters.focus++; }
@@ -25,7 +26,7 @@ function load(overrides = {}) {
   const localRequire = (request) => ({ electron, './settings': settings, './ipc': ipc, './libraryQuery': { queryLibrary: () => ({ rows: [] }) }, './localModels': { idleShutdown: () => counters.idle++ } }[request] || require(request));
   vm.runInNewContext(source, { require: localRequire, module, exports: module.exports, __dirname: path.join(__dirname, '..', 'src', 'main'), process, console });
   let opened = 0; const controller = module.exports.createQuickSearch({ openWindow: () => opened++, getMainWindow: () => overrides.mainWindow || null });
-  return { controller, handlers, windows, counters, opened: () => opened, file };
+  return { controller, handlers, windows, counters, opened: () => opened, file, shortcutCalls };
 }
 
 test('IPC accepts only the live popup top frame', async () => {
@@ -39,6 +40,14 @@ test('consent gate and shortcut registration failures remain usable', () => {
   const consent = load({ tosAccepted: false }); assert.equal(consent.controller.show(), false); assert.equal(consent.opened(), 1); assert.equal(consent.windows.length, 0);
   const denied = load({ shortcut: false }); assert.equal(denied.controller.start(), false); assert.equal(denied.controller.shortcutRegistered, false);
   const thrown = load({ shortcut: () => { throw new Error('conflict'); } }); assert.equal(thrown.controller.start(), false);
+});
+
+test('shortcut preference rebinds once, disables cleanly, and rejects invalid values', () => {
+  const x = load(); x.controller.start(); assert.deepEqual(x.shortcutCalls.register, ['CommandOrControl+Shift+Space']);
+  assert.equal(x.controller.applyShortcut('CommandOrControl+Alt+Space'), true); assert.deepEqual(x.shortcutCalls.unregister, ['CommandOrControl+Shift+Space']);
+  x.controller.applyShortcut('CommandOrControl+Alt+Space'); assert.equal(x.shortcutCalls.register.length, 2);
+  assert.equal(x.controller.applyShortcut(''), true); assert.equal(x.controller.status().status, 'disabled'); assert.deepEqual(x.shortcutCalls.unregister, ['CommandOrControl+Shift+Space', 'CommandOrControl+Alt+Space']);
+  assert.equal(x.controller.applyShortcut('bad'), false); assert.equal(x.controller.status().status, 'unavailable');
 });
 
 test('open and reveal require indexed existing paths and surface shell failures', async () => {

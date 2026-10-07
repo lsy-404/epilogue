@@ -8,11 +8,14 @@ const ipc = require('./ipc');
 const { queryLibrary } = require('./libraryQuery');
 
 const DEFAULT_ACCELERATOR = 'CommandOrControl+Shift+Space';
+const SHORTCUTS = new Set([DEFAULT_ACCELERATOR, 'CommandOrControl+Alt+Space', 'CommandOrControl+Shift+F', '']);
 
 function createQuickSearch({ openWindow, getMainWindow }) {
   let popup = null;
   let registered = false;
   let handlersRegistered = false;
+  let activeShortcut = '';
+  let status = 'disabled';
 
   function owns(event) {
     return Boolean(popup && !popup.isDestroyed() && event?.sender === popup.webContents && event?.senderFrame === popup.webContents.mainFrame);
@@ -30,7 +33,7 @@ function createQuickSearch({ openWindow, getMainWindow }) {
     handlersRegistered = true;
     ipcMain.handle('quick-search:state', (event) => {
       if (!owns(event)) throw new Error('Rejected untrusted quick-search sender');
-      return { language: settings.get().language, platform: process.platform, tosAccepted: settings.get().tosAccepted === true, shortcut: DEFAULT_ACCELERATOR, shortcutRegistered: registered };
+      return { language: settings.get().language, platform: process.platform, tosAccepted: settings.get().tosAccepted === true, shortcut: activeShortcut, shortcutRegistered: registered, shortcutStatus: status };
     });
     ipcMain.handle('quick-search:query', async (event, query) => {
       if (!owns(event)) throw new Error('Rejected untrusted quick-search sender');
@@ -121,16 +124,24 @@ function createQuickSearch({ openWindow, getMainWindow }) {
   }
 
   function start() {
-    try {
-      registered = globalShortcut.register(DEFAULT_ACCELERATOR, show) === true;
-    } catch {
-      registered = false;
-    }
-    app.on('will-quit', () => globalShortcut.unregister(DEFAULT_ACCELERATOR));
+    applyShortcut(settings.get().app?.quickSearchShortcut);
+    app.on('will-quit', () => { if (activeShortcut) globalShortcut.unregister(activeShortcut); });
     return registered;
   }
 
-  return { start, show, isOpen: () => Boolean(popup && !popup.isDestroyed()), get shortcutRegistered() { return registered; } };
+  function applyShortcut(value) {
+    const next = String(value ?? DEFAULT_ACCELERATOR);
+    if (!SHORTCUTS.has(next)) { if (activeShortcut) globalShortcut.unregister(activeShortcut); activeShortcut = ''; registered = false; status = 'unavailable'; return false; }
+    if (next === activeShortcut) return registered;
+    if (activeShortcut) globalShortcut.unregister(activeShortcut);
+    activeShortcut = next;
+    if (!next) { registered = false; status = 'disabled'; return true; }
+    try { registered = globalShortcut.register(next, show) === true; status = registered ? 'registered' : 'unavailable'; }
+    catch { registered = false; status = 'unavailable'; }
+    return registered;
+  }
+
+  return { start, show, applyShortcut, status: () => ({ shortcut: activeShortcut, registered, status }), isOpen: () => Boolean(popup && !popup.isDestroyed()), get shortcutRegistered() { return registered; } };
 }
 
 module.exports = { createQuickSearch, DEFAULT_ACCELERATOR };

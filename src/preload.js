@@ -4,6 +4,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('epologue', {
   getSettings: () => ipcRenderer.invoke('settings:get'),
   setSettings: (patch) => ipcRenderer.invoke('settings:set', patch),
+  quickSearchStatus: () => ipcRenderer.invoke('quick-search:status'),
   detectFolders: () => ipcRenderer.invoke('folders:detect'),
   pickFolder: () => ipcRenderer.invoke('dialog:pickFolder'),
   pickFiles: () => ipcRenderer.invoke('dialog:pickFiles'),

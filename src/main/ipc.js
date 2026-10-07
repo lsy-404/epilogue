@@ -144,6 +144,7 @@ function register(getWindow, hooks = {}) {
     hooks.onSettingsChanged?.(cfg); // 应用开机启动、重排定时扫描等
     return cfg;
   });
+  handle('quick-search:status', () => hooks.getQuickSearchStatus?.() || null);
 
   handle('folders:detect', () => {
     const detected = require('./specialFolders').detect();

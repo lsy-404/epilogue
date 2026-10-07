@@ -1349,11 +1349,18 @@ document.body.addEventListener('click', (e) => {
 /* ---------- 设置：表单 ---------- */
 function loadSettingsForm(st) {
   upgradeSelects();
+  if (/Mac/i.test(navigator.platform || '')) {
+    $('#prefQuickSearchShortcut option[value="CommandOrControl+Shift+Space"]').textContent = '⌘⇧Space（默认）';
+    $('#prefQuickSearchShortcut option[value="CommandOrControl+Alt+Space"]').textContent = '⌘⌥Space';
+    $('#prefQuickSearchShortcut option[value="CommandOrControl+Shift+F"]').textContent = '⌘⇧F';
+  }
   PROVIDER_TYPES.forEach(renderProviders);
   $('#rulesInput').value = st.rules || '';
   $('#prefLanguage').value = st.language || 'zh';
   $('#prefLogin').checked = st.app.launchAtLogin;
   $('#prefTray').checked = st.app.trayKeepAlive;
+  $('#prefQuickSearchShortcut').value = st.app.quickSearchShortcut || 'CommandOrControl+Shift+Space';
+  refreshQuickSearchStatus();
   $('#prefLowPower').checked = st.app.lowPower;
   $('#prefMetered').checked = st.app.avoidCloudOnMetered;
   $('#prefAutoScan').checked = st.cleanup.autoScan;
@@ -1521,6 +1528,7 @@ function collectSettingsPatch() {
     app: {
       launchAtLogin: $('#prefLogin').checked,
       trayKeepAlive: $('#prefTray').checked,
+      quickSearchShortcut: $('#prefQuickSearchShortcut').value,
       lowPower: $('#prefLowPower').checked,
       avoidCloudOnMetered: $('#prefMetered').checked,
     },
@@ -1534,6 +1542,13 @@ function collectSettingsPatch() {
   };
 }
 
+async function refreshQuickSearchStatus() {
+  const state = await api.quickSearchStatus?.();
+  if (!state) return;
+  const key = state.status === 'registered' ? 'quick_search_status_registered' : state.status === 'disabled' ? 'quick_search_status_disabled' : 'quick_search_status_unavailable';
+  $('#quickSearchStatus').textContent = t(key);
+}
+
 let saveTimer = null;
 let flashTimer = null;
 function flashSaved(target) {
@@ -1545,6 +1560,7 @@ function flashSaved(target) {
 async function autoSaveNow(target) {
   clearTimeout(saveTimer);
   currentSettings = await api.setSettings(collectSettingsPatch());
+  if (target === 'settings') refreshQuickSearchStatus();
   flashSaved(target);
 }
 function scheduleAutoSave(target) {
