@@ -15,8 +15,12 @@
 
   function render() {
     results.textContent = '';
+    query.setAttribute('aria-expanded', hits.length ? 'true' : 'false');
+    if (hits.length) query.setAttribute('aria-activedescendant', `result-${selected}`);
+    else query.removeAttribute('aria-activedescendant');
     hits.forEach((hit, index) => {
       const row = document.createElement('li');
+      row.id = `result-${index}`;
       row.setAttribute('role', 'option');
       row.className = index === selected ? 'selected' : '';
       row.setAttribute('aria-selected', index === selected ? 'true' : 'false');
@@ -60,9 +64,10 @@
     const current = sequence;
     timer = setTimeout(() => runSearch(query.value, current), 120);
   });
-  query.addEventListener('keydown', (event) => {
+  document.addEventListener('keydown', (event) => {
     if (event.isComposing || event.keyCode === 229) return;
-    if (event.key === 'Escape') { sequence++; api.hide(); return; }
+    if (event.key === 'Escape') { sequence++; clearTimeout(timer); api.hide(); return; }
+    if (event.target !== query) return;
     if (event.key === 'ArrowDown' && hits.length) { event.preventDefault(); selected = (selected + 1) % hits.length; render(); }
     if (event.key === 'ArrowUp' && hits.length) { event.preventDefault(); selected = (selected + hits.length - 1) % hits.length; render(); }
     if (event.key === 'Enter' && hits.length) { event.preventDefault(); choose(selected, event.shiftKey); }
@@ -72,8 +77,11 @@
   api.state().then((state) => {
     document.documentElement.lang = state.language || 'zh';
     if (state.language === 'en') copy = { empty: 'No matching files', loading: 'Searching…', error: 'Search failed. Try again.', shortcut: state.platform === 'darwin' ? '⌘⇧Space' : 'Ctrl+Shift+Space', hints: '↑↓ Select · Enter Open · Shift+Enter Reveal · Esc Close', close: 'Close', input: 'Search indexed files' };
-    else if (state.platform === 'darwin') copy.shortcut = '⌘⇧Space';
-    shortcut.textContent = state.shortcutRegistered ? copy.shortcut : `${copy.shortcut} · unavailable`;
+    const accelerator = (state.shortcut || '').replace('CommandOrControl', state.platform === 'darwin' ? 'Cmd' : 'Ctrl');
+    const english = state.language === 'en';
+    shortcut.textContent = state.shortcutStatus === 'disabled'
+      ? (english ? 'Shortcut disabled' : '快捷键已禁用')
+      : `${accelerator}${state.shortcutRegistered ? '' : (english ? ' · unavailable' : ' · 不可用')}`;
     keyboardHints.textContent = copy.hints;
     close.setAttribute('aria-label', copy.close);
     query.setAttribute('aria-label', copy.input);

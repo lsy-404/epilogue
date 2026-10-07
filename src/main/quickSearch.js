@@ -131,13 +131,29 @@ function createQuickSearch({ openWindow, getMainWindow }) {
 
   function applyShortcut(value) {
     const next = String(value ?? DEFAULT_ACCELERATOR);
-    if (!SHORTCUTS.has(next)) { if (activeShortcut) globalShortcut.unregister(activeShortcut); activeShortcut = ''; registered = false; status = 'unavailable'; return false; }
+    if (!SHORTCUTS.has(next)) {
+      if (activeShortcut) globalShortcut.unregister(activeShortcut);
+      activeShortcut = '';
+      registered = false;
+      status = 'unavailable';
+      return false;
+    }
+    if (!next) {
+      if (activeShortcut) globalShortcut.unregister(activeShortcut);
+      activeShortcut = '';
+      registered = false;
+      status = 'disabled';
+      return true;
+    }
     if (next === activeShortcut) return registered;
     if (activeShortcut) globalShortcut.unregister(activeShortcut);
     activeShortcut = next;
-    if (!next) { registered = false; status = 'disabled'; return true; }
-    try { registered = globalShortcut.register(next, show) === true; status = registered ? 'registered' : 'unavailable'; }
-    catch { registered = false; status = 'unavailable'; }
+    try {
+      registered = globalShortcut.register(next, show) === true;
+    } catch {
+      registered = false;
+    }
+    status = registered ? 'registered' : 'unavailable';
     return registered;
   }
 

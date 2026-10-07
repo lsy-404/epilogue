@@ -1350,7 +1350,7 @@ document.body.addEventListener('click', (e) => {
 function loadSettingsForm(st) {
   upgradeSelects();
   if (/Mac/i.test(navigator.platform || '')) {
-    $('#prefQuickSearchShortcut option[value="CommandOrControl+Shift+Space"]').textContent = '⌘⇧Space（默认）';
+    $('#prefQuickSearchShortcut option[value="CommandOrControl+Shift+Space"]').textContent = st.language === 'en' ? '⌘⇧Space (default)' : '⌘⇧Space（默认）';
     $('#prefQuickSearchShortcut option[value="CommandOrControl+Alt+Space"]').textContent = '⌘⌥Space';
     $('#prefQuickSearchShortcut option[value="CommandOrControl+Shift+F"]').textContent = '⌘⇧F';
   }
@@ -1359,7 +1359,8 @@ function loadSettingsForm(st) {
   $('#prefLanguage').value = st.language || 'zh';
   $('#prefLogin').checked = st.app.launchAtLogin;
   $('#prefTray').checked = st.app.trayKeepAlive;
-  $('#prefQuickSearchShortcut').value = st.app.quickSearchShortcut || 'CommandOrControl+Shift+Space';
+  $('#prefQuickSearchShortcut').value = st.app.quickSearchShortcut ?? 'CommandOrControl+Shift+Space';
+  syncSelectProxy($('#prefQuickSearchShortcut'));
   refreshQuickSearchStatus();
   $('#prefLowPower').checked = st.app.lowPower;
   $('#prefMetered').checked = st.app.avoidCloudOnMetered;

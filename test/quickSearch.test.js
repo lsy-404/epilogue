@@ -48,6 +48,7 @@ test('shortcut preference rebinds once, disables cleanly, and rejects invalid va
   x.controller.applyShortcut('CommandOrControl+Alt+Space'); assert.equal(x.shortcutCalls.register.length, 2);
   assert.equal(x.controller.applyShortcut(''), true); assert.equal(x.controller.status().status, 'disabled'); assert.deepEqual(x.shortcutCalls.unregister, ['CommandOrControl+Shift+Space', 'CommandOrControl+Alt+Space']);
   assert.equal(x.controller.applyShortcut('bad'), false); assert.equal(x.controller.status().status, 'unavailable');
+  assert.equal(x.controller.applyShortcut(''), true); assert.equal(x.controller.status().status, 'disabled');
 });
 
 test('open and reveal require indexed existing paths and surface shell failures', async () => {

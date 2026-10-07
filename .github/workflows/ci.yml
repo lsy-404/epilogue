@@ -30,5 +30,9 @@ jobs:
         run: node test/public-model-auth.test.mjs
       - name: Run tests
         run: pnpm test
+      - name: Verify quick search in Electron
+        run: xvfb-run -a node test/quick-search-smoke.cjs
       - name: Package Linux x64
         run: bash scripts/pack.sh linux x64
+      - name: Verify packaged runtime
+        run: xvfb-run -a node test/packaged-runtime-smoke.cjs
