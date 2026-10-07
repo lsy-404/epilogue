@@ -7,6 +7,7 @@ const ipc = require('./ipc');
 const scheduler = require('./scheduler');
 const { makeT } = require('../shared/locales');
 const { isTrustedRendererNavigation } = require('./runtimeSecurity');
+const { createQuickSearch } = require('./quickSearch');
 
 // ---- 低占用：限制 V8 堆、暴露 gc（托盘 trim 用）----
 app.commandLine.appendSwitch('js-flags', '--max-old-space-size=512 --expose-gc');
@@ -27,6 +28,7 @@ const TRAY_ICON =
 let win = null;
 let tray = null;
 let pendingAutoScan = null;
+let quickSearch = null;
 
 // 单实例：二次启动只是打开窗口
 if (!app.requestSingleInstanceLock()) {
@@ -83,8 +85,10 @@ function openWindow(view) {
     win = null;
     // 托盘纯保活：卸索引数据、空闲时关停模型子进程、主动 GC 收缩堆 ——
     // 托盘态只剩 托盘图标 + 定时器 + 设置缓存；一切按需惰性重建
-    ipc.unloadStore();
-    require('./localModels').idleShutdown();
+    if (!quickSearch?.isOpen()) {
+      ipc.unloadStore();
+      require('./localModels').idleShutdown();
+    }
     // 托盘驻留时不占 Dock：纯托盘存在，重开窗口时恢复
     if (process.platform === 'darwin' && settings.get().app.trayKeepAlive) app.dock?.hide();
     setTimeout(() => {
@@ -128,6 +132,7 @@ function buildTrayMenu() {
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: t('tray_open'), click: () => openWindow() },
+      { label: t('tray_search'), click: () => quickSearch?.show() },
       {
         label: t('tray_scan'),
         click: () => {
@@ -180,6 +185,8 @@ app.whenReady().then(() => {
   if (!settings.get().stats.firstRunAt) settings.set({ stats: { firstRunAt: Date.now() } });
   settings.seedCleanupFolders(); // 识别 下载/桌面 → 添加为未启用条目（存量用户；新用户在 folders:detect 后）
   ipc.register(() => win, { onSettingsChanged: applyAppSettings });
+  quickSearch = createQuickSearch({ openWindow, getMainWindow: () => win });
+  quickSearch.start();
   createTray();
   scheduler.start({ openWindow, getWindow: () => win });
   applyAppSettings(settings.get());
