@@ -34,9 +34,13 @@ jobs:
         run: |
           sudo chown root:root node_modules/electron/dist/chrome-sandbox
           sudo chmod 4755 node_modules/electron/dist/chrome-sandbox
+      - name: Install test window manager
+        run: sudo apt-get update && sudo apt-get install -y openbox
       - name: Verify quick search in Electron
-        run: xvfb-run -a node test/quick-search-smoke.cjs
+        run: xvfb-run -a dbus-run-session -- sh -c 'openbox & node test/quick-search-smoke.cjs'
+        env:
+          EPILOGUE_SMOKE_DEBUG: '1'
       - name: Package Linux x64
         run: bash scripts/pack.sh linux x64
       - name: Verify packaged runtime
-        run: xvfb-run -a node test/packaged-runtime-smoke.cjs
+        run: xvfb-run -a dbus-run-session -- node test/packaged-runtime-smoke.cjs
