@@ -124,3 +124,49 @@ test('applyMoves rejects an existing symlink that escapes the selected root', as
   assert.equal(fs.existsSync(source), true);
   assert.equal(fs.existsSync(path.join(outside, 'source.txt')), false);
 });
+
+test('applyMoves rejects a new directory through an escaping symlink before creating it', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'epilogue-classifier-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const source = path.join(root, 'source.txt');
+  const allowed = path.join(root, 'allowed');
+  const outside = path.join(root, 'outside');
+  const escape = path.join(allowed, 'escape');
+  fs.mkdirSync(allowed);
+  fs.mkdirSync(outside);
+  fs.writeFileSync(source, 'keep');
+  try {
+    fs.symlinkSync(outside, escape, 'junction');
+  } catch (error) {
+    if (['EPERM', 'EACCES', 'UNKNOWN'].includes(error.code)) return;
+    throw error;
+  }
+  const classifier = loadClassifier([allowed]);
+  const [result] = await classifier.applyMoves(
+    [{ filePath: source, destination: allowed, subfolder: 'escape/newdir' }],
+    { updatePath() {} },
+    { journal: journalStub() },
+  );
+  assert.match(result.error, /子文件夹/);
+  assert.equal(fs.existsSync(source), true);
+  assert.equal(fs.existsSync(path.join(outside, 'newdir')), false);
+});
+
+test('applyMoves allows creating a nested path below a configured root symlink', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'epilogue-classifier-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const source = path.join(root, 'source.txt');
+  const realRoot = path.join(root, 'real-root');
+  const configuredRoot = path.join(root, 'configured-root');
+  fs.mkdirSync(realRoot);
+  fs.symlinkSync(realRoot, configuredRoot, 'junction');
+  fs.writeFileSync(source, 'move');
+  const classifier = loadClassifier([configuredRoot]);
+  const [result] = await classifier.applyMoves(
+    [{ filePath: source, destination: configuredRoot, subfolder: 'newdir' }],
+    { updatePath() {} },
+    { journal: journalStub() },
+  );
+  assert.equal(result.newPath, path.join(configuredRoot, 'newdir', 'source.txt'));
+  assert.equal(fs.readFileSync(path.join(realRoot, 'newdir', 'source.txt'), 'utf8'), 'move');
+});
