@@ -159,7 +159,7 @@ jobs:
           {"name":"epilogue-release-tools","private":true,"pnpm":{"onlyBuiltDependencies":["electron-installer-debian"]}}
           EOF
           pnpm --dir "$tool_dir" add --save-exact electron-installer-debian@4.0.0
-          node scripts/installer-linux.js ${{ matrix.arch }} "$GITHUB_REF_NAME"
+          NODE_PATH="$tool_dir/node_modules" node scripts/installer-linux.js ${{ matrix.arch }} "$GITHUB_REF_NAME"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: source-linux-${{ matrix.arch }}

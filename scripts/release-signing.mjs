@@ -127,6 +127,7 @@ async function createPayload(config, temp) {
     const staging = path.join(temp, 'windows-input');
     await mkdir(path.join(staging, 'app'), { recursive: true, mode: 0o700 });
     await cp(app, path.join(staging, 'app'), { recursive: true, verbatimSymlinks: true });
+    await copyFile(path.join(packageRoot,'build','icon.ico'),path.join(staging,'app','resources','installer.ico'));
     await copyFile(source, path.join(staging, 'source.json'));
     const powershell = [
       'Add-Type -AssemblyName System.IO.Compression.FileSystem;',
