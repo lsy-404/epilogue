@@ -233,7 +233,7 @@ async function streamToFile(response, file, maxBytes) {
 }
 
 function parseReport(report, request) {
-  if (!report || report.request_id !== request.request_id || report.input_digest !== request.input_digest
+  if (!report || report.request_id !== request.request_id || !DIGEST.test(report.input_digest ?? '') || (request.platform === 'windows' && report.input_digest !== request.input_digest)
     || report.version !== request.version || report.bundle_id !== BUNDLE_ID || report.architecture !== request.architecture
     || !SHA.test(report.recipe_sha ?? '') || !DIGEST.test(report.policy_digest ?? '') || !Array.isArray(report.files)) throw new ReleaseError('SIGNING_REPORT_MISMATCH');
   if (request.platform === 'macos') {
