@@ -52,7 +52,7 @@ bash scripts/pack.sh [platform] [arch]   # local packaging
 
 Tests cover all three Chat protocol adapters, model discovery, safe body merging, agent boundaries, reversible file moves, and streaming vector storage.
 
-Pushing a `v*` tag triggers CI for every supported release target. macOS Intel is temporarily excluded because the current local-model runtime no longer ships Darwin x64 binaries; this avoids publishing an installable package with broken local models.
+Pushing a stable `vX.Y.Z` tag builds source packages for each platform and submits macOS arm64 and Windows x64/arm64 to the signing center; it does not create a public release. Once all source builds succeed and the signing requests finish, the center automatically dispatches **Publish signed release**. To recover a publication, you can also run it manually in GitHub Actions with the source run's ID. The publisher creates the release only after the center verifies all signed outputs, then attaches the signed installers, Linux packages, checksums, and attestations. Signed outputs are removed 24 hours after success, so run the publisher promptly. macOS Intel remains excluded because the local-model runtime no longer ships Darwin x64 binaries.
 
 ## Privacy & License
 

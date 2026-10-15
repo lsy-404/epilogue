@@ -52,7 +52,7 @@ bash scripts/pack.sh [platform] [arch]   # 本地打包
 
 测试覆盖三类 Chat 协议的请求/响应转换、模型发现、安全请求体合并、Agent 工具边界、文件移动撤销与流式向量存储。
 
-推送 `v*` 标签即由 CI 自动构建各受支持平台发布包。macOS Intel 暂不发布：当前本地模型运行时已停止提供 Darwin x64 二进制，避免提供能安装但本地模型不可用的坏包。
+推送稳定版 `vX.Y.Z` 标签会构建各平台源包，并将 macOS arm64 与 Windows x64/arm64 提交到签名中心；此步骤不会创建公开 Release。所有构建成功且签名请求结束后，签名中心会自动触发 **Publish signed release**；需要恢复发布时，也可在 GitHub Actions 手动运行它并输入源构建的 run ID。签名中心核验通过后，发布流程才会创建 Release 并附上签名包、Linux 包、校验和与证明。签名输出会在成功后 24 小时清理，请及时运行发布流程。macOS Intel 暂不发布：当前本地模型运行时已停止提供 Darwin x64 二进制，避免提供能安装但本地模型不可用的坏包。
 
 ## 隐私与许可
 
