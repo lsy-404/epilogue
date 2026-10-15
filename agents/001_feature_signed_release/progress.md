@@ -15,3 +15,6 @@
 - 既有工作流供应链案例按源/发布拆分后的实际职责调整；未新增测试案例。
 
 - Azure federation 已改为实际不可变 OIDC sub；修复 Mac 报告阶段摘要校验，既有 98 条测试和 actionlint 通过。新发布候选 0.5.1，保留旧候选标签。
+
+- 0.5.1 源 run 38799586669 成功；macOS 请求签名、公证完成，本机 Get-Sign 验证镜像内 Epilogue 0.5.1 为 PASS、DefaultPassed、VerifiedStapled。Windows ARM64 有限重试已耗尽，固定配方失败于 codesign；尚未发布 GitHub Release。
+- 保留 v0.5.0/v0.5.1 标签及既有审计，使用 0.5.2 新候选重新构建，避免移动标签或复用终态请求；签名中心继续修复实际 Windows 失败后由统一发布工作流收齐三平台结果。
