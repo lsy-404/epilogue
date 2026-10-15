@@ -36,7 +36,8 @@
     },
     "onlyBuiltDependencies": [
       "ffmpeg-static",
-      "onnxruntime-node"
+      "onnxruntime-node",
+      "electron"
     ]
   }
 }

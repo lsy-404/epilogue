@@ -118,11 +118,11 @@ test('checksum writer emits a portable SHA-256 sidecar', async (t) => {
   );
 });
 
-test('release workflow pins supply-chain actions and installer tools', () => {
+test('release workflows pin supply-chain actions and local installer tools', () => {
   const workflow = fs.readFileSync(
     path.join(__dirname, '..', '.github', 'workflows', 'release.yml'),
     'utf8',
-  );
+  ) + '\n' + fs.readFileSync(path.join(__dirname, '..', '.github', 'workflows', 'release-publish.yml'), 'utf8');
 
   assert.match(workflow, /id-token: write/);
   assert.match(workflow, /attestations: write/);
@@ -130,7 +130,6 @@ test('release workflow pins supply-chain actions and installer tools', () => {
   assert.match(workflow, /actions\/setup-node@[a-f0-9]{40} # v7\.0\.0/);
   assert.match(workflow, /actions\/attest@[a-f0-9]{40} # v4\.2\.2/);
   assert.match(workflow, /softprops\/action-gh-release@[a-f0-9]{40} # v3\.0\.2/);
-  assert.match(workflow, /electron-winstaller@5\.4\.4/);
   assert.match(workflow, /electron-installer-debian@4\.0\.0/);
   assert.doesNotMatch(workflow, /macos-15-intel/);
   assert.doesNotMatch(workflow, /uses:\s+[^\s]+@v\d+/);

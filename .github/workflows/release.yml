@@ -104,6 +104,7 @@ jobs:
         run: |
           pnpm install --frozen-lockfile --ignore-scripts || pnpm install --frozen-lockfile --ignore-scripts
           npm_config_arch=x64 pnpm rebuild ffmpeg-static
+          pnpm rebuild electron
       - name: Run existing checks
         run: pnpm test
       - name: Package application
