@@ -19,3 +19,4 @@
 - 0.5.1 源 run 38799586669 成功；macOS 请求签名、公证完成，本机 Get-Sign 验证镜像内 Epilogue 0.5.1 为 PASS、DefaultPassed、VerifiedStapled。Windows ARM64 有限重试已耗尽，固定配方失败于 codesign；尚未发布 GitHub Release。
 - 保留 v0.5.0/v0.5.1 标签及既有审计，使用 0.5.2 新候选重新构建，避免移动标签或复用终态请求；签名中心继续修复实际 Windows 失败后由统一发布工作流收齐三平台结果。
 - 0.5.2 的 Mac 最终 DMG 及内部应用已用本机 Get-Sign 验收，版本 0.5.2、PASS、DefaultPassed / Distribution Passed、VerifiedStapled；Windows x64 在修正 SDK 返回值前耗尽有限重试，整个候选未发布。保留既有标签，使用 0.5.3 新源请求消费修正后的固定 Windows 配方。
+- 0.5.3 的 Mac 最终阶段经过有限重试后仍失败，历史阶段码 stapling 覆盖了后续多个验证步骤，不能据此断定为 Apple 服务错误。中心已将最终 DMG / App 的签名、票据、Gatekeeper、挂载、布局及输出阶段分别标记，保留所有原验证；使用 0.5.4 新候选重新取得可核实的结果，不移动旧标签或复用终态请求。
