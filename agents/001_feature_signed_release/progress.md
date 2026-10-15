@@ -19,4 +19,9 @@
 - 0.5.1 源 run 38799586669 成功；macOS 请求签名、公证完成，本机 Get-Sign 验证镜像内 Epilogue 0.5.1 为 PASS、DefaultPassed、VerifiedStapled。Windows ARM64 有限重试已耗尽，固定配方失败于 codesign；尚未发布 GitHub Release。
 - 保留 v0.5.0/v0.5.1 标签及既有审计，使用 0.5.2 新候选重新构建，避免移动标签或复用终态请求；签名中心继续修复实际 Windows 失败后由统一发布工作流收齐三平台结果。
 - 0.5.2 的 Mac 最终 DMG 及内部应用已用本机 Get-Sign 验收，版本 0.5.2、PASS、DefaultPassed / Distribution Passed、VerifiedStapled；Windows x64 在修正 SDK 返回值前耗尽有限重试，整个候选未发布。保留既有标签，使用 0.5.3 新源请求消费修正后的固定 Windows 配方。
-- 0.5.3 的 Mac 最终阶段经过有限重试后仍失败，历史阶段码 stapling 覆盖了后续多个验证步骤，不能据此断定为 Apple 服务错误。中心已将最终 DMG / App 的签名、票据、Gatekeeper、挂载、布局及输出阶段分别标记，保留所有原验证；使用 0.5.4 新候选重新取得可核实的结果，不移动旧标签或复用终态请求。
+- 0.5.3 的 Mac 最终阶段最初报错，后续重试最终成功；两个 Windows 请求失败，因此该候选未公开发布。历史阶段码 stapling 覆盖了后续多个验证步骤，不能据此断定为 Apple 服务错误。中心已将最终 DMG / App 的签名、票据、Gatekeeper、挂载、布局及输出阶段分别标记，保留所有原验证；使用 0.5.4 新候选重新取得可核实的结果，不移动旧标签或复用终态请求。
+
+- 0.5.4 源 run `38818633574` 成功。Mac 最终原生 run `38820642663`、Windows x64 `38823201890`、ARM64 `38823083574` 均完成输出回执和清理；中央状态成功，Windows 使用签名后的 Squirrel 包且报告确认 Authenticode、时间戳和内嵌 PE。
+- 发布 run `38823935220` 成功，正式 `v0.5.4` 已公开，包含 Mac DMG、Windows x64/ARM64 Setup、更新包及 Linux 包。签名报告中的 SHA-256 和大小与 GitHub Release 资产逐项一致。
+- 本机 `Get-Sign` 检查最终 DMG 及只读挂载内 App，结果均 PASS、公证票据 VerifiedStapled；App 版本 0.5.4，Apple 默认策略 DefaultPassed，分发检查通过。未修改本机 Gatekeeper 设置。
+- 最终 Mac DMG SHA-256 为 `b2fa7e3d56686cd1e93ddd86b48d8cc91eb5a0ae40f48f343b2a27f7731283e9`；Windows x64 Setup 为 `71e380606957dcddc2f0fdafd78e45f40f641a2ab99a1194b567528419574228`，ARM64 Setup 为 `52ad9dc284c86d949b1b88295f9f6f181e069645474e4ac4719f3f46c02ad024`。

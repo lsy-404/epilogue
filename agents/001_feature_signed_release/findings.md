@@ -18,3 +18,6 @@
 - 0.5.0 候选未公开发布。Windows 固定执行器在 Azure 登录前失败，原因是新仓库 OIDC sub 包含 owner/repo 固定 ID；主任务已修正 federation。失败输入按既定策略立即删除，不做数据库恢复或放宽来源限制。
 - Mac 最终报告的 input_digest 是 dmg_finalize 阶段的输入摘要，不能与原始来源包摘要相等；保留状态中的原始摘要绑定及归档/报告一致性验证。
 - 使用 0.5.1 新候选保留 v0.5.0 标签及构建记录，不移动已有标签。相对正式 0.4.1 仍是 minor 升级。
+
+- 最终 0.5.4 已验证 Azure 公共信任签名可用，Windows 证书完整主题为 `CN=VOIDCARVE LABS, O=VOIDCARVE LABS, L=Mississauga, S=Ontario, C=CA`；Mac 使用 Apple Team `76DMUAK6J5` 的 Developer ID，签名与公证均通过。
+- Windows Squirrel 执行器需为独立单文件进程提供确切依赖解析范围，并设置其使用的 SQUIRREL_TEMP；两个架构的实际最终包与内嵌签名验收通过，不扩大签名允许目录。
