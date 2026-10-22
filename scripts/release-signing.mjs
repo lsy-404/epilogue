@@ -6,29 +6,25 @@ import { Transform, Readable } from 'node:stream';
 import { spawn, spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { downloadSigningOutput, getSigningRequest, GitEdgeSigningError, submitSigningRequest } from './gitedge-signing.mjs';
 
-const SIGNING_API = 'https://sign.voidcarve.com/v1/requests';
-const PROJECTS = Object.freeze({
-  'macos-arm64': { id: 'epilogue-macos-arm64', platform: 'macos', architecture: 'arm64' },
-  'windows-x64': { id: 'epilogue-windows-x64', platform: 'windows', architecture: 'x64' },
-  'windows-arm64': { id: 'epilogue-windows-arm64', platform: 'windows', architecture: 'arm64' },
+const LANES = Object.freeze({
+  'macos-arm64': { profile: 'epilogue-macos-arm64', artifactName: 'epilogue-macos-arm64-source', platform: 'macos', architecture: 'arm64' },
+  'windows-x64': { profile: 'epilogue-windows-x64', artifactName: 'epilogue-windows-x64-source', platform: 'windows', architecture: 'x64' },
+  'windows-arm64': { profile: 'epilogue-windows-arm64', artifactName: 'epilogue-windows-arm64-source', platform: 'windows', architecture: 'arm64' },
 });
 const BUNDLE_ID = 'com.electron.epilogue';
 const SHA = /^[a-f0-9]{40}$/;
 const DIGEST = /^sha256:[a-f0-9]{64}$/;
 const VERSION = /^\d+\.\d+\.\d+$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-const MAX_INPUT_BYTES = 1_000_000_000;
-const MAX_OUTPUT_BYTES = 2_000_000_000;
-const PART_ATTEMPTS = 5;
+const MARKER = '.epilogue-signing-source';
 
 class ReleaseError extends Error {
   constructor(code, transient = false) { super(code); this.code = code; this.transient = transient; }
 }
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-const stableJson = value => JSON.stringify(value, (_key, child) => child && typeof child === 'object' && !Array.isArray(child)
-  ? Object.fromEntries(Object.keys(child).sort().map(key => [key, child[key]])) : child);
 const digestFile = async file => {
   const hash = createHash('sha256');
   let size = 0;
@@ -47,134 +43,54 @@ function required(name, value) {
   return value;
 }
 
-function validateInputs({ platform, architecture, version, sourceSha, runId, runAttempt, apiKey }) {
+function validateInputs({ platform, architecture, version, sourceSha, runId, runAttempt }) {
   const lane = `${platform}-${architecture}`;
-  const project = PROJECTS[lane];
-  if (!project || !VERSION.test(version ?? '') || !SHA.test(sourceSha ?? '') || !/^\d+$/.test(runId ?? '')
+  const config = LANES[lane];
+  if (!config || !VERSION.test(version ?? '') || !SHA.test(sourceSha ?? '') || !/^\d+$/.test(runId ?? '')
     || !Number.isSafeInteger(Number(runId)) || runAttempt !== '1') throw new ReleaseError('INVALID_SIGNING_INPUT');
-  required('SIGNING_API_KEY', apiKey);
-  return { lane, project, version, sourceSha, runId: String(Number(runId)), apiKey };
-}
-
-async function apiJson(fetchImpl, url, method, apiKey, body, headers = {}, timeout = 30_000) {
-  let response;
-  try {
-    response = await fetchImpl(url, {
-      method, redirect: 'error', signal: AbortSignal.timeout(timeout),
-      headers: { authorization: `Bearer ${apiKey}`, accept: 'application/json', 'content-type': 'application/json', ...headers },
-      body: JSON.stringify(body),
-    });
-  } catch { throw new ReleaseError('SIGNING_API_UNAVAILABLE', true); }
-  if (!response.ok) {
-    await response.body?.cancel();
-    throw new ReleaseError(`SIGNING_API_${response.status}`, response.status === 408 || response.status === 429 || response.status >= 500);
-  }
-  let data;
-  try { data = await response.json(); } catch { throw new ReleaseError('SIGNING_RESPONSE_INVALID'); }
-  return data;
-}
-
-async function runIdentity(env = process.env, fetchImpl = fetch) {
-  const credential = env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
-  if (!env.ACTIONS_ID_TOKEN_REQUEST_URL || !credential) throw new ReleaseError('RUN_IDENTITY_UNAVAILABLE');
-  let url;
-  try {
-    url = new URL(env.ACTIONS_ID_TOKEN_REQUEST_URL);
-    if (url.protocol !== 'https:' || url.username || url.password || url.hash) throw new Error();
-    url.searchParams.set('audience', new URL(SIGNING_API).origin);
-  } catch { throw new ReleaseError('RUN_IDENTITY_UNAVAILABLE'); }
-  let response;
-  try {
-    response = await fetchImpl(url.href, { redirect: 'error', headers: { authorization: `Bearer ${credential}`, accept: 'application/json' }, signal: AbortSignal.timeout(30_000) });
-  } catch { throw new ReleaseError('RUN_IDENTITY_FAILED', true); }
-  if (!response.ok) { await response.body?.cancel(); throw new ReleaseError('RUN_IDENTITY_FAILED', response.status === 408 || response.status === 429 || response.status >= 500); }
-  let body;
-  try { body = await response.json(); } catch { throw new ReleaseError('RUN_IDENTITY_FAILED'); }
-  if (typeof body.value !== 'string' || body.value.length < 1 || body.value.length > 4096 || /[\r\n]/.test(body.value)) throw new ReleaseError('RUN_IDENTITY_FAILED');
-  return { 'x-run-identity': body.value };
-}
-
-async function retry(call) {
-  for (let attempt = 1; ; attempt += 1) {
-    try { return await call(); }
-    catch (error) {
-      if (!(error instanceof ReleaseError) || !error.transient || attempt >= PART_ATTEMPTS) throw error;
-      await sleep(2000 * 2 ** (attempt - 1));
-    }
-  }
+  return { lane, ...config, version, sourceSha, runId: String(Number(runId)) };
 }
 
 async function createPayload(config, temp) {
   const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-  const app = path.join(packageRoot, 'dist', `Epilogue-${config.project.platform === 'macos' ? 'darwin' : 'win32'}-${config.project.architecture}`);
+  const app = path.join(packageRoot, 'dist', `Epilogue-${config.platform === 'macos' ? 'darwin' : 'win32'}-${config.architecture}`);
   if (!(await lstat(app).catch(() => null))?.isDirectory()) throw new ReleaseError('PACKAGED_APP_MISSING');
-  const source = path.join(temp, 'source.json');
-  await writeFile(source, `${JSON.stringify({ source_sha: config.sourceSha, version: config.version, bundle_id: BUNDLE_ID, architecture: config.project.architecture })}\n`, { mode: 0o600, flag: 'wx' });
-  const archive = path.join(temp, 'input.zip');
-  if (config.project.platform === 'macos') {
+  const stage = path.join(temp, 'source');
+  await mkdir(stage, { mode: 0o700 });
+  await writeFile(path.join(stage, 'source.json'), `${JSON.stringify({ source_sha: config.sourceSha, version: config.version, bundle_id: BUNDLE_ID, architecture: config.architecture })}\n`, { mode: 0o600, flag: 'wx' });
+  if (config.platform === 'macos') {
     const appBundle = path.join(app, 'Epilogue.app');
     if (!(await lstat(appBundle).catch(() => null))?.isDirectory()) throw new ReleaseError('MACOS_APP_MISSING');
-    const unsigned = path.join(temp, 'unsigned.tar.gz');
+    const unsigned = path.join(stage, 'unsigned.tar.gz');
     run('tar', ['-czf', unsigned, '-C', app, 'Epilogue.app']);
     const templateRoot = path.join(temp, 'template-root');
     await mkdir(templateRoot, { mode: 0o700 });
     await cp(appBundle, path.join(templateRoot, 'Epilogue.app'), { recursive: true, verbatimSymlinks: true });
     await run('ln', ['-s', '/Applications', path.join(templateRoot, 'Applications')]);
-    const template = path.join(temp, 'template.dmg');
+    const template = path.join(stage, 'template.dmg');
     run('hdiutil', ['create', '-volname', 'Epilogue', '-srcfolder', templateRoot, '-ov', '-format', 'UDZO', template]);
-    run('zip', ['-X', '-0', archive, 'unsigned.tar.gz', 'template.dmg', 'source.json'], { cwd: temp });
   } else {
-    const staging = path.join(temp, 'windows-input');
-    await mkdir(path.join(staging, 'app'), { recursive: true, mode: 0o700 });
-    await cp(app, path.join(staging, 'app'), { recursive: true, verbatimSymlinks: true });
-    await copyFile(path.join(packageRoot,'build','icon.ico'),path.join(staging,'app','resources','installer.ico'));
-    await copyFile(source, path.join(staging, 'source.json'));
-    const powershell = [
-      'Add-Type -AssemblyName System.IO.Compression.FileSystem;',
-      '[IO.Compression.ZipFile]::CreateFromDirectory($env:INPUT_ROOT, $env:INPUT_ZIP, [IO.Compression.CompressionLevel]::NoCompression, $false)',
-    ].join(' ');
-    run('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', powershell], {
-      env: { ...process.env, INPUT_ROOT: staging, INPUT_ZIP: archive },
-    });
+    await mkdir(path.join(stage, 'app'), { mode: 0o700 });
+    await cp(app, path.join(stage, 'app'), { recursive: true, verbatimSymlinks: true });
+    await copyFile(path.join(packageRoot, 'build', 'icon.ico'), path.join(stage, 'app', 'resources', 'installer.ico'));
   }
-  const input = await digestFile(archive);
-  if (input.size < 1 || input.size > MAX_INPUT_BYTES) throw new ReleaseError('SIGNING_INPUT_SIZE_INVALID');
-  return { archive, input };
 }
 
-async function requestPlan(fetchImpl, base, apiKey, identityHeaders, input) {
-  const plan = await retry(async () => apiJson(fetchImpl, `${base}/source`, 'POST', apiKey, {}, await identityHeaders()));
-  if (!Number.isSafeInteger(plan.part_size) || plan.part_size < 5 * 1024 * 1024 || plan.part_size > 64 * 1024 * 1024
-    || plan.part_count !== Math.ceil(input.size / plan.part_size) || !Array.isArray(plan.received_parts)) throw new ReleaseError('SIGNING_UPLOAD_PLAN_INVALID');
-  return plan;
-}
-
-async function putPart(fetchImpl, url, apiKey, identity, file, start, length) {
-  const response = await fetchImpl(url, {
-    method: 'PUT', redirect: 'error', signal: AbortSignal.timeout(300_000),
-    headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/octet-stream', 'content-length': String(length), ...identity },
-    body: createReadStream(file, { start, end: start + length - 1 }), duplex: 'half',
+async function prepareSource() {
+  const config = validateInputs({
+    platform: process.env.INPUT_PLATFORM, architecture: process.env.INPUT_ARCHITECTURE,
+    version: process.env.INPUT_VERSION, sourceSha: process.env.INPUT_SOURCE_SHA,
+    runId: process.env.GITHUB_RUN_ID, runAttempt: process.env.GITHUB_RUN_ATTEMPT,
   });
-  await response.body?.cancel();
-  return response.status;
-}
-
-async function uploadInput(fetchImpl, base, apiKey, identityHeaders, file, input) {
-  let plan = await requestPlan(fetchImpl, base, apiKey, identityHeaders, input);
-  for (let part = 1; part <= plan.part_count; part += 1) {
-    if (plan.received_parts.includes(part)) continue;
-    const start = (part - 1) * plan.part_size;
-    const length = Math.min(plan.part_size, input.size - start);
-    for (let attempt = 1; ; attempt += 1) {
-      let status = 0;
-      const identity = await retry(identityHeaders);
-      try { status = await putPart(fetchImpl, `${base}/source/parts/${part}`, apiKey, identity, file, start, length); } catch { status = 0; }
-      if (status === 200) break;
-      if (status !== 0 && status !== 408 && status !== 429 && status < 500 || attempt >= PART_ATTEMPTS) throw new ReleaseError('SOURCE_UPLOAD_FAILED');
-      await sleep(2000 * 2 ** (attempt - 1));
-      plan = await requestPlan(fetchImpl, base, apiKey, identityHeaders, input);
-      if (plan.received_parts.includes(part)) break;
-    }
+  const tempRoot = required('RUNNER_TEMP', process.env.RUNNER_TEMP);
+  const temp = await mkdtemp(path.join(tempRoot, `epilogue-${config.lane}-`));
+  await chmod(temp, 0o700);
+  try {
+    await createPayload(config, temp);
+    await writeFile(path.join(temp, MARKER), `${config.runId}\n${config.lane}\n`, { mode: 0o600, flag: 'wx' });
+    if (process.env.GITHUB_OUTPUT) await writeFile(process.env.GITHUB_OUTPUT, `source_dir=${path.join(temp, 'source')}\nwork_dir=${temp}\n`, { flag: 'a' });
+  } finally {
+    if (!process.env.GITHUB_OUTPUT) await rm(temp, { recursive: true, force: true });
   }
 }
 
@@ -183,33 +99,45 @@ async function submitSource() {
     platform: process.env.INPUT_PLATFORM, architecture: process.env.INPUT_ARCHITECTURE,
     version: process.env.INPUT_VERSION, sourceSha: process.env.INPUT_SOURCE_SHA,
     runId: process.env.GITHUB_RUN_ID, runAttempt: process.env.GITHUB_RUN_ATTEMPT,
-    apiKey: process.env.SIGNING_API_KEY,
   });
-  const tempRoot = required('RUNNER_TEMP', process.env.RUNNER_TEMP);
-  const temp = await mkdtemp(path.join(tempRoot, `epilogue-${config.lane}-`));
-  await chmod(temp, 0o700);
+  const tempRoot = path.resolve(required('RUNNER_TEMP', process.env.RUNNER_TEMP));
+  const workDir = path.resolve(required('INPUT_WORK_DIR', process.env.INPUT_WORK_DIR));
+  if (path.dirname(workDir) !== tempRoot || !path.basename(workDir).startsWith(`epilogue-${config.lane}-${config.runId}-`)) throw new ReleaseError('SOURCE_CONTEXT_INVALID');
+  const marker = await readFile(path.join(workDir, MARKER), 'utf8').catch(() => '');
+  if (marker !== `${config.runId}\n${config.lane}\n`) throw new ReleaseError('SOURCE_CONTEXT_INVALID');
+  const sourceDir = path.join(workDir, 'source');
+  const names = (await readdir(sourceDir)).sort();
+  const expectedNames = config.platform === 'macos' ? ['source.json', 'template.dmg', 'unsigned.tar.gz'] : ['app', 'source.json'];
+  if (names.join('\n') !== expectedNames.join('\n')) throw new ReleaseError('SOURCE_CONTEXT_INVALID');
+  let metadata;
+  try { metadata = JSON.parse(await readFile(path.join(sourceDir, 'source.json'), 'utf8')); }
+  catch { throw new ReleaseError('SOURCE_CONTEXT_INVALID'); }
+  if (metadata.source_sha !== config.sourceSha || metadata.version !== config.version
+    || metadata.bundle_id !== BUNDLE_ID || metadata.architecture !== config.architecture) throw new ReleaseError('SOURCE_CONTEXT_INVALID');
+  const artifactId = required('INPUT_ARTIFACT_ID', process.env.INPUT_ARTIFACT_ID);
   try {
-    const { archive, input } = await createPayload(config, temp);
-    const identityHeaders = () => runIdentity(process.env, fetch);
-    const created = await retry(async () => apiJson(fetch, SIGNING_API, 'POST', config.apiKey, {
-      project_id: config.project.id, platform: config.project.platform, run_id: Number(config.runId), run_attempt: 1,
-      input_digest: input.digest, input_size: input.size, version: config.version, source_sha: config.sourceSha, execution_visibility: 'public',
-    }, { 'idempotency-key': `epilogue-${config.project.id}-${config.runId}-1`, ...await identityHeaders() }));
-    if (typeof created.request_id !== 'string' || !UUID.test(created.request_id) || created.project_id !== config.project.id
-      || created.platform !== config.project.platform || created.source_run_id !== Number(config.runId)
-      || created.input_digest !== input.digest || created.source_sha !== config.sourceSha || created.version !== config.version) throw new ReleaseError('SIGNING_REQUEST_MISMATCH');
-    if (created.state === 'awaiting_upload') {
-      const base = `${SIGNING_API}/${created.request_id}`;
-      await uploadInput(fetch, base, config.apiKey, identityHeaders, archive, input);
-      const completed = await retry(async () => apiJson(fetch, `${base}/source/complete`, 'POST', config.apiKey, {}, await identityHeaders(), 300_000));
-      if (completed.state !== 'accepted_waiting_source') throw new ReleaseError('SIGNING_SOURCE_REJECTED');
-    } else if (created.state !== 'accepted_waiting_source') throw new ReleaseError('SIGNING_SOURCE_REJECTED');
-    const requestFile = path.join(required('INPUT_CONTEXT_DIR', process.env.INPUT_CONTEXT_DIR), `request-${config.project.id}.json`);
+    const result = await submitSigningRequest({
+      env: {
+        ...process.env,
+        INPUT_ARTIFACT_NAME: config.artifactName,
+        INPUT_PROFILE: config.profile,
+        INPUT_PLATFORM: config.platform,
+        INPUT_VERSION: config.version,
+        INPUT_ARTIFACT_ID: artifactId,
+      },
+    });
+    const requestFile = path.join(required('INPUT_CONTEXT_DIR', process.env.INPUT_CONTEXT_DIR), `request-${config.profile}.json`);
     await mkdir(path.dirname(requestFile), { recursive: true });
-    await writeFile(requestFile, `${JSON.stringify({ project_id: config.project.id, request_id: created.request_id, input_digest: input.digest, input_size: input.size, version: config.version, source_sha: config.sourceSha, platform: config.project.platform, architecture: config.project.architecture })}\n`, { mode: 0o600, flag: 'wx' });
-    if (process.env.GITHUB_OUTPUT) await writeFile(process.env.GITHUB_OUTPUT, `request_id=${created.request_id}\ninput_digest=${input.digest}\n`, { flag: 'a' });
+    await writeFile(requestFile, `${JSON.stringify({ profile: config.profile, request_id: result.request_id,
+      input_digest: result.input_digest, input_size: result.input_size, version: config.version,
+      source_sha: config.sourceSha, platform: config.platform, architecture: config.architecture })}\n`, { mode: 0o600, flag: 'wx' });
+    if (process.env.GITHUB_OUTPUT) await writeFile(process.env.GITHUB_OUTPUT,
+      `request_id=${result.request_id}\ninput_digest=${result.input_digest}\ninput_size=${result.input_size}\nprofile=${config.profile}\n`, { flag: 'a' });
+  } catch (error) {
+    if (error instanceof GitEdgeSigningError) throw new ReleaseError(error.code, error.transient);
+    throw error;
   } finally {
-    await rm(temp, { recursive: true, force: true });
+    await rm(workDir, { recursive: true, force: true });
   }
 }
 
@@ -217,19 +145,6 @@ async function githubJson(url, token) {
   const response = await fetch(url, { redirect: 'error', headers: { authorization: `Bearer ${token}`, accept: 'application/vnd.github+json', 'x-github-api-version': '2022-11-28' }, signal: AbortSignal.timeout(30_000) });
   if (!response.ok) { await response.body?.cancel(); throw new ReleaseError('GITHUB_API_FAILED'); }
   return response.json();
-}
-
-async function streamToFile(response, file, maxBytes) {
-  const hash = createHash('sha256');
-  let size = 0;
-  const meter = new Transform({ transform(chunk, _encoding, callback) {
-    size += chunk.length;
-    if (size > maxBytes) return callback(new ReleaseError('SIGNED_ARCHIVE_TOO_LARGE'));
-    hash.update(chunk);
-    callback(null, chunk);
-  } });
-  await pipeline(Readable.fromWeb(response.body), meter, createWriteStream(file, { flags: 'wx', mode: 0o600 }));
-  return { size, digest: `sha256:${hash.digest('hex')}` };
 }
 
 function parseReport(report, request) {
@@ -267,28 +182,23 @@ async function extractEntry(archive, name, destination, expected) {
   if ((await closed).code !== 0 || size !== expected.size || hash.digest('hex') !== expected.sha256) throw new ReleaseError('SIGNED_FILE_DIGEST_MISMATCH');
 }
 
-async function downloadAndVerify(request, apiKey, outDir) {
+async function downloadAndVerify(request, outDir) {
+  const signingEnv = process.env;
   let status;
-  try {
-    const response = await fetch(`${SIGNING_API}/${request.request_id}`, { headers: { authorization: `Bearer ${apiKey}`, accept: 'application/json' }, redirect: 'error', signal: AbortSignal.timeout(30_000) });
-    if (!response.ok) throw new ReleaseError('SIGNING_STATUS_UNAVAILABLE', response.status >= 500 || response.status === 408 || response.status === 429);
-    status = await response.json();
-  } catch (error) {
-    if (error instanceof ReleaseError) throw error;
+  try { status = await getSigningRequest({ env: signingEnv, requestId: request.request_id }); }
+  catch (error) {
+    if (error instanceof GitEdgeSigningError) throw new ReleaseError(error.code, error.transient);
     throw new ReleaseError('SIGNING_STATUS_UNAVAILABLE', true);
   }
-  if (status.request_id !== request.request_id || status.project_id !== request.project_id || status.platform !== request.platform
-    || status.source_run_id !== Number(process.env.INPUT_BUILD_RUN_ID) || status.source_sha !== request.source_sha
-    || status.version !== request.version || status.input_digest !== request.input_digest) throw new ReleaseError('SIGNING_REQUEST_MISMATCH');
-  if (status.state !== 'succeeded') return { done: false, failed: status.state === 'failed' || status.state === 'cancelled', error: status.error };
-  const expectedArchive = status.output;
-  if (!expectedArchive || !DIGEST.test(expectedArchive.archive_digest ?? '') || !Number.isSafeInteger(expectedArchive.archive_size)) throw new ReleaseError('SIGNING_OUTPUT_INVALID');
-  const response = await fetch(`${SIGNING_API}/${request.request_id}/download`, { headers: { authorization: `Bearer ${apiKey}`, accept: 'application/octet-stream' }, redirect: 'error', signal: AbortSignal.timeout(300_000) });
-  if (!response.ok || !response.body) { await response.body?.cancel(); throw new ReleaseError(response.status === 410 ? 'SIGNED_OUTPUT_EXPIRED' : 'SIGNED_OUTPUT_UNAVAILABLE', response.status === 409 || response.status >= 500 || response.status === 408 || response.status === 429); }
-  const archiveHeader = response.headers.get('x-signing-archive-digest');
-  const archive = path.join(outDir, `${request.project_id}.zip`);
-  const actual = await streamToFile(response, archive, MAX_OUTPUT_BYTES);
-  if (archiveHeader !== expectedArchive.archive_digest || actual.digest !== expectedArchive.archive_digest || actual.size !== expectedArchive.archive_size) throw new ReleaseError('SIGNED_ARCHIVE_MISMATCH');
+  if (status.id !== request.request_id || status.profile !== request.profile || status.platform !== request.platform
+    || status.sourceDigest !== request.input_digest || status.sourceSize !== request.input_size) throw new ReleaseError('SIGNING_REQUEST_MISMATCH');
+  if (status.state !== 'succeeded') return { done: false, failed: status.state === 'failed' || status.state === 'cancelled', error: status.state };
+  const archive = path.join(outDir, `${request.profile}.zip`);
+  try { await downloadSigningOutput({ env: signingEnv, request: status, destination: archive }); }
+  catch (error) {
+    if (error instanceof GitEdgeSigningError) throw new ReleaseError(error.code, error.transient);
+    throw new ReleaseError('SIGNED_OUTPUT_UNAVAILABLE', true);
+  }
   const entries = run('unzip', ['-Z1', archive]).trim().split(/\r?\n/).filter(Boolean);
   if (new Set(entries).size !== entries.length || entries.some(name => name.includes('/') || name.includes('\\')) || !entries.includes('verification.json')) throw new ReleaseError('SIGNED_ARCHIVE_CONTENT_INVALID');
   const allowed = request.platform === 'macos' ? new Set(['product.dmg', 'verification.json']) : new Set(['product.exe', 'product.nupkg', 'RELEASES', 'verification.json']);
@@ -300,20 +210,18 @@ async function downloadAndVerify(request, apiKey, outDir) {
   }
   if (entries.some(name => !allowed.has(name))) throw new ReleaseError('SIGNED_ARCHIVE_CONTENT_INVALID');
   const report = parseReport(JSON.parse(run('unzip', ['-p', archive, 'verification.json'], { maxBuffer: 2_000_000 })), request);
-  if (stableJson(report) !== stableJson(expectedArchive.report)) throw new ReleaseError('SIGNING_REPORT_MISMATCH');
   const reported = new Map(report.files.map(file => [file.path, file]));
   const outputMap = request.platform === 'macos'
     ? [['product.dmg', `Epilogue-v${request.version}-darwin-${request.architecture}.dmg`]]
     : [['product.exe', `Epilogue-v${request.version}-win32-${request.architecture}-Setup.exe`], [report.files.find(file => /-full\.nupkg$/.test(file.path)).path, report.files.find(file => /-full\.nupkg$/.test(file.path)).path], ['RELEASES', `Epilogue-v${request.version}-win32-${request.architecture}-RELEASES`]];
   for (const [entry, filename] of outputMap) await extractEntry(archive, entry, path.join(outDir, filename), reported.get(entry));
-  const verification = `Epilogue-v${request.version}-${request.project_id}-verification.json`;
+  const verification = `Epilogue-v${request.version}-${request.profile}-verification.json`;
   await writeFile(path.join(outDir, verification), `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600, flag: 'wx' });
   await rm(archive, { force: true });
   return { done: true };
 }
 
 async function publish() {
-  const apiKey = required('SIGNING_API_KEY', process.env.SIGNING_API_KEY);
   const buildRunId = process.env.INPUT_BUILD_RUN_ID;
   const repository = required('GITHUB_REPOSITORY', process.env.GITHUB_REPOSITORY);
   const token = required('GITHUB_TOKEN', process.env.GITHUB_TOKEN);
@@ -326,11 +234,11 @@ async function publish() {
   const outDir = path.resolve(required('INPUT_OUTPUT_DIR', process.env.INPUT_OUTPUT_DIR));
   await mkdir(outDir, { recursive: true });
   const requests = [];
-  for (const [lane, project] of Object.entries(PROJECTS)) {
-    const file = path.join(requestDir, `request-${project.id}.json`);
+  for (const [lane, config] of Object.entries(LANES)) {
+    const file = path.join(requestDir, `request-${config.profile}.json`);
     let request;
     try { request = JSON.parse(await readFile(file, 'utf8')); } catch { throw new ReleaseError('SOURCE_CONTEXT_INVALID'); }
-    if (request.project_id !== project.id || request.platform !== project.platform || request.architecture !== project.architecture
+    if (request.profile !== config.profile || request.platform !== config.platform || request.architecture !== config.architecture
       || request.version !== run.head_branch.slice(1) || request.source_sha !== run.head_sha || !UUID.test(request.request_id ?? '')
       || !DIGEST.test(request.input_digest ?? '') || !Number.isSafeInteger(request.input_size) || request.input_size < 1) throw new ReleaseError('SOURCE_CONTEXT_INVALID');
     requests.push({ lane, ...request });
@@ -341,7 +249,7 @@ async function publish() {
     for (const request of requests) {
       if (!pending.has(request.request_id)) continue;
       try {
-        const result = await downloadAndVerify(request, apiKey, outDir);
+        const result = await downloadAndVerify(request, outDir);
         if (result.failed) throw new ReleaseError(`SIGNING_${String(result.error || 'FAILED').toUpperCase()}`);
         if (result.done) pending.delete(request.request_id);
       } catch (error) {
@@ -367,7 +275,8 @@ async function publish() {
 async function main() {
   try {
     const command = process.argv[2];
-    if (command === 'source') await submitSource();
+    if (command === 'prepare') await prepareSource();
+    else if (command === 'submit') await submitSource();
     else if (command === 'publish') await publish();
     else throw new ReleaseError('INVALID_COMMAND');
   } catch (error) {

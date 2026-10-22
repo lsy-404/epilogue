@@ -131,6 +131,16 @@ test('release workflows pin supply-chain actions and local installer tools', () 
   assert.match(workflow, /actions\/attest@[a-f0-9]{40} # v4\.2\.2/);
   assert.match(workflow, /softprops\/action-gh-release@[a-f0-9]{40} # v3\.0\.2/);
   assert.match(workflow, /electron-installer-debian@4\.0\.0/);
+  assert.match(workflow, /GITEDGE_SIGNING_TOKEN: \$\{\{ secrets\.GITEDGE_SIGNING_TOKEN \}\}/);
+  assert.match(workflow, /GITEDGE_ORIGIN: https:\/\/gitedge\.voidcarve\.com/);
+  for (const lane of ['macos-arm64', 'windows-x64', 'windows-arm64']) {
+    assert.match(workflow, new RegExp(`epilogue-${lane}-source`));
+    assert.match(workflow, new RegExp(`epilogue-${lane}`));
+  }
+  assert.match(workflow, /node scripts\/release-signing\.mjs prepare/);
+  assert.match(workflow, /node scripts\/release-signing\.mjs submit/);
+  assert.match(workflow, /node scripts\/release-signing\.mjs publish/);
+  assert.doesNotMatch(workflow, /SIGNING_API_KEY|sign\.voidcarve\.com\/v1\/requests/);
   assert.doesNotMatch(workflow, /macos-15-intel/);
   assert.doesNotMatch(workflow, /uses:\s+[^\s]+@v\d+/);
 });

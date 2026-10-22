@@ -46,7 +46,9 @@ jobs:
       - name: Poll signing center and assemble verified release assets
         id: assemble
         env:
-          SIGNING_API_KEY: ${{ secrets.SIGNING_API_KEY }}
+          GITEDGE_ORIGIN: https://gitedge.voidcarve.com
+          GITEDGE_RUNNER_REPOSITORY_ID: 13814fa3-8580-4b5a-803e-a6b1206007ed
+          GITEDGE_SIGNING_TOKEN: ${{ secrets.GITEDGE_SIGNING_TOKEN }}
           GITHUB_TOKEN: ${{ github.token }}
           INPUT_BUILD_RUN_ID: ${{ inputs.build_run_id }}
           INPUT_CONTEXT_DIR: ${{ runner.temp }}/epilogue-source-files
