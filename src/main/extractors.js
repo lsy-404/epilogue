@@ -91,7 +91,7 @@ function extractArchive(filePath) {
 async function extractOffice(filePath, opts) {
   const { parseOffice } = require('officeparser');
   const ast = await parseOffice(filePath, { extractAttachments: false, ocr: false });
-  const text = ast.toText();
+  const text = (await ast.to('text')).value;
   const ext = path.extname(filePath).toLowerCase();
   // Excel 识别模式：headers = 仅表头与前几行
   if (['.xlsx', '.ods'].includes(ext) && opts.xlsxMode === 'headers') {

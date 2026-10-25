@@ -185,6 +185,7 @@ export async function packageApp(platform, arch) {
       /^\/\.git(?:\/|$)/,
       /^\/scripts(?:\/|$)/,
       /node_modules\/onnxruntime-web(?:\/|$)/,
+      /node_modules\/officeparser\/dist\/officeparser\.browser\./,
     ],
     afterPrune: [
       async ({ buildPath, platform: hookPlatform, arch: hookArch }) => {

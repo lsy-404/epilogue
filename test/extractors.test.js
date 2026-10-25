@@ -30,7 +30,7 @@ function minimalPdf(text) {
   return Buffer.from(pdf, 'latin1');
 }
 
-test('Office extraction supports the officeparser v6 AST API', async (t) => {
+test('Office extraction supports the officeparser v8 AST API', async (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'epilogue-office-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const file = path.join(dir, 'hello.docx');

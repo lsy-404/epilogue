@@ -8,7 +8,7 @@ const manifest = JSON.parse(await readFile(path.join(root, "package.json"), "utf
 const lock = await readFile(path.join(root, "pnpm-lock.yaml"), "utf8");
 const legacyVendor = path.join(root, "vendor", "model-auth");
 assert.equal((await readdir(legacyVendor).catch(() => [])).length, 0);
-for (const [name, version] of [["core", "0.9.0"], ["providers", "0.13.0"], ["vue", "0.10.3"]]) {
+for (const [name, version] of [["core", "0.11.1"], ["providers", "0.20.0"], ["vue", "0.14.0"]]) {
   const dependency = `https://github.com/lsy-404/platform-kit/releases/download/model-auth-${name}-v${version}/model-auth-${name}-${version}.tgz`;
   assert.equal(manifest.dependencies[`@model-auth/${name}`], dependency);
   const lockKey = `  '@model-auth/${name}@${dependency}':`;

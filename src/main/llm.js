@@ -325,7 +325,7 @@ async function compatibleChatCompletion(provider, messages, options = {}) {
       const system = messages.filter((message) => message.role === 'system').map((message) => String(message.content || '')).filter(Boolean).join('\n\n');
       const result = await generateText({
         model: sdk.languageModel(provider.model),
-        ...(system ? { system } : {}),
+        ...(system ? { instructions: system } : {}),
         messages: compatibleMessages(messages),
         ...(Object.keys(definitions).length ? { tools: definitions } : {}),
         ...(options.maxTokens ? { maxOutputTokens: options.maxTokens } : {}),

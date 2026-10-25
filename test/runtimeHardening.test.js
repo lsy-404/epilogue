@@ -31,7 +31,7 @@ test('IPC trust requires the live main WebContents and its top-level frame', () 
   assert.equal(isTrustedIpcEvent({ sender: contents, senderFrame: mainFrame }, () => null), false);
 });
 
-test('Electron 44 runtime hardening is configured without removed macOS APIs', () => {
+test('Electron 45 runtime hardening is configured without removed macOS APIs', () => {
   const main = read('src/main/index.js');
   const ipc = read('src/main/ipc.js');
   assert.match(main, /sandbox:\s*true/);
