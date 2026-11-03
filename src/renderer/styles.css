@@ -514,7 +514,6 @@ select:focus { border-color: var(--gold); }
 .provider-row.local-row { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
 .provider-row.local-row .model-name { font-family: var(--font-mono); font-size: 0.74rem; color: var(--text-secondary); }
 .provider-row.local-row .spacer { flex: 1; }
-.drag-handle { cursor: grab; color: var(--text-dim); font-size: 0.84rem; user-select: none; }
 .x-btn {
   background: none;
   border: 1px solid transparent;
@@ -568,7 +567,6 @@ select:focus { border-color: var(--gold); }
 .mini-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 .mini-btn.ok { color: var(--accent-green); border-color: var(--accent-green); }
 .mini-btn.err { color: var(--accent-red); border-color: var(--accent-red); }
-.provider-row.dragging { opacity: 0.4; border-color: var(--gold); }
 .provider-row input:disabled { opacity: 0.55; cursor: not-allowed; }
 .enable-box { flex-shrink: 0; }
 .enable-box span { font-size: 0.73rem; font-family: var(--font-mono); }
@@ -588,8 +586,8 @@ select:focus { border-color: var(--gold); }
 .provider-list { display: flex; flex-direction: column; gap: 0.5rem; }
 .provider-row {
   display: grid;
-  /* 8 列：⠿手柄 | 名称 | Base URL | API Key | Model | 测试 | 启用 | ✕（手柄列 auto，避免挤出名称前大空白） */
-  grid-template-columns: auto 1.1fr 1.6fr 1.3fr 1.3fr auto auto auto;
+  /* 7 列：名称 | Base URL | API Key | Model | 测试 | 启用 | ✕ */
+  grid-template-columns: 1.1fr 1.6fr 1.3fr 1.3fr auto auto auto;
   gap: 0.5rem;
   align-items: center;
   padding: 0.5rem;
@@ -936,7 +934,7 @@ input[type='range'] { accent-color: var(--gold); }
   background: var(--bg-card-hover);
 }
 .provider-row:has(.provider-protocol) {
-  grid-template-columns: auto minmax(92px, 1fr) minmax(130px, 1.1fr) minmax(150px, 1.5fr) minmax(120px, 1.15fr) minmax(110px, 1.1fr) auto auto auto auto;
+  grid-template-columns: minmax(92px, 1fr) minmax(130px, 1.1fr) minmax(150px, 1.5fr) minmax(120px, 1.15fr) minmax(110px, 1.1fr) auto auto auto auto;
 }
 .provider-row input,
 .provider-row select { min-width: 0; font-size: 0.74rem; }
@@ -1154,9 +1152,8 @@ input[type='range'] { accent-color: var(--gold); }
   .topbar-stats { display: none; }
   .main { padding-inline: 1.2rem; }
   .provider-row,
-  .provider-row:has(.provider-protocol) { grid-template-columns: auto 1fr 1fr; }
+  .provider-row:has(.provider-protocol) { grid-template-columns: 1fr 1fr; }
   .provider-row > * { min-width: 0; }
-  .provider-row .drag-handle { grid-row: 1 / span 2; }
   .agent-runtime-banner { align-items: flex-start; flex-direction: column; }
 }
 
