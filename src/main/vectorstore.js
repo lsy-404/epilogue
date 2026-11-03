@@ -28,6 +28,11 @@ function hasVec(r) {
   return (r.vecDim || 0) > 0;
 }
 
+// 完整索引的图片记录只可能带 CLIP 向量，与文本 embedding 同为 512 维但不在同一空间
+function hasTextVec(r) {
+  return hasVec(r) && !(r.kind === 'image' && r.indexedMode === 'full');
+}
+
 function writeAllSync(file, buffer, position = null) {
   let offset = 0;
   while (offset < buffer.length) {
@@ -379,13 +384,13 @@ class VectorStore {
     this._scanBin((id, dim, vecBuf) => {
       if (dim !== q.length || this.pendingVec.has(id)) return;
       const record = this.idIndex.get(id);
-      if (!record || !hasVec(record)) return;
+      if (!record || !hasTextVec(record)) return;
       const view = new Float32Array(vecBuf.buffer, vecBuf.byteOffset, dim);
       consider(record, VectorStore.cosine(q, view));
     });
     for (const [id, f] of this.pendingVec) {
       const record = this.idIndex.get(id);
-      if (record && f.length === q.length) consider(record, VectorStore.cosine(q, f));
+      if (record && hasTextVec(record) && f.length === q.length) consider(record, VectorStore.cosine(q, f));
     }
     return hits.sort((a, b) => b.score - a.score);
   }
