@@ -36,7 +36,6 @@ app.whenReady().then(async () => {
   const settings = require('../src/main/settings');
   settings.set({ tosAccepted: true, recordedFolders: [{ path: fixture }], cleanup: { autoScan: false, folders: [] } });
   const ipc = require('../src/main/ipc');
-  ipc.resumeStore();
   const store = ipc.getStore();
   for (let index = 0; index < 1001; index++) store.upsert({
     filePath: path.join(fixture, `${index}.txt`), fileName: `${index}.txt`,

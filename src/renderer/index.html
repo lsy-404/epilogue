@@ -199,7 +199,7 @@
 
       <div class="tab-page" id="tab-general">
         <div class="panel">
-          <div class="panel-head"><h2 data-i18n="app_title"></h2><span class="badge" id="powerBadge"></span></div>
+          <div class="panel-head"><h2 data-i18n="app_title"></h2></div>
           <div class="app-prefs">
             <label class="check"><span data-i18n="language_label"></span>
               <select id="prefLanguage"><option value="zh">中文</option><option value="en">English</option></select>
@@ -219,7 +219,6 @@
         <div class="panel">
           <div class="panel-head"><h2 data-i18n="opt_title"></h2></div>
           <div class="app-prefs">
-            <label class="check"><input type="checkbox" id="prefLowPower" /><span data-i18n="pref_lowpower"></span></label>
             <label class="check"><input type="checkbox" id="prefMetered" /><span data-i18n="pref_metered"></span></label>
           </div>
         </div>
@@ -239,32 +238,16 @@
           <details class="provider-advanced-section">
             <summary>Advanced provider configuration</summary>
             <div class="provider-list" id="providers-chat"></div>
-            <p class="hint" data-i18n="drag_hint"></p>
           </details>
           <p class="hint" data-i18n="prov_hint_chat"></p>
         </div>
 
         <div class="panel">
-          <div class="panel-head"><h2 data-i18n="prov_emb"></h2><button class="btn ghost" data-add-provider="embeddings" data-i18n="prov_add"></button></div>
+          <div class="panel-head"><h2 data-i18n="prov_emb"></h2></div>
           <div class="provider-list" id="providers-embeddings"></div>
           <p class="hint" data-i18n="prov_hint_emb"></p>
         </div>
 
-        <div class="panel">
-          <div class="panel-head"><h2 data-i18n="img_title"></h2></div>
-          <div class="provider-list" id="imgModelList"></div>
-          <div class="app-prefs" style="margin-top:0.6rem">
-            <label class="check"><input type="checkbox" id="imgEnabled" disabled /><span data-i18n="img_enable"></span></label>
-            <label class="check"><input type="checkbox" id="imgGpu" /><span data-i18n="img_gpu"></span></label>
-          </div>
-          <p class="hint" data-i18n="img_hint"></p>
-        </div>
-
-        <div class="panel">
-          <div class="panel-head"><h2 data-i18n="prov_whisper"></h2><button class="btn ghost" data-add-provider="transcription" data-i18n="prov_add"></button></div>
-          <div class="provider-list" id="providers-transcription"></div>
-          <p class="hint" data-i18n="prov_hint_whisper"></p>
-        </div>
       </div>
 
       <div class="tab-page hidden" id="tab-extraction">
@@ -285,7 +268,6 @@
             </label>
             <label><span data-i18n="ext_pdf_pages"></span><input type="number" id="extPdfPages" min="1" /></label>
             <label><span data-i18n="ext_max_chars"></span><input type="number" id="extMaxChars" min="500" step="500" /></label>
-            <label><span data-i18n="ext_stt_secs"></span><input type="number" id="extSttSecs" min="30" step="30" /></label>
           </div>
           <p class="hint" data-i18n="ext_hint"></p>
         </div>
@@ -370,7 +352,6 @@
     </div>
   </div>
   <script src="../shared/locales.js"></script>
-  <script src="../shared/imageModels.js"></script>
   <script src="app.js"></script>
   <script type="module" src="modelAuth.js"></script>
 </body>

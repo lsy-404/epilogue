@@ -13,8 +13,6 @@ const lazy = {
 };
 
 let store;
-let storeUsers = 0;
-let unloadRequested = true;
 const modelAuthOperations = new Map();
 
 function getStore() {
@@ -25,27 +23,8 @@ function getStore() {
   return store;
 }
 
-// 托盘驻留不持数据：窗口关闭时落盘并卸载，GUI 重开 / 定时任务到点经 getStore() 惰性重建
-function unloadStore() {
-  unloadRequested = true;
-  if (storeUsers || !store) return;
-  store.flush();
-  require('./log').log('app', 'store unloaded (tray idle)', { records: store.stats().total });
-  store = null;
-}
-
-function resumeStore() {
-  unloadRequested = false;
-}
-
 async function withStore(operation) {
-  storeUsers++;
-  try {
-    return await operation(getStore());
-  } finally {
-    storeUsers--;
-    if (unloadRequested) unloadStore();
-  }
+  return operation(getStore());
 }
 
 // 寻物三模式：keyword 纯关键字 / match embedding 匹配度（只出命中与分数）/ ai 检索 + LLM 总结
@@ -68,20 +47,6 @@ async function search(s, question, mode) {
       usedVector = hits.length > 0;
     } catch {
       /* embedding 失败 → 退回关键词 */
-    }
-  }
-  // 图形 embedding：CLIP 文本向量检索图片向量（512 维只配图片记录），与文本命中合并去重
-  if (wantVector && cfg.imageEmbed?.enabled) {
-    try {
-      const localModels = require('./localModels');
-      if (localModels.status(cfg.imageEmbed.model).downloaded) {
-        const [iv] = await localModels.clipTextEmbed([question], cfg.imageEmbed.model);
-        const imgHits = s.searchByVector(iv, 8).filter((h) => !hits.some((x) => x.record.filePath === h.record.filePath));
-        hits = [...hits, ...imgHits].slice(0, 10);
-        usedVector = usedVector || imgHits.length > 0;
-      }
-    } catch {
-      /* CLIP 检索失败不影响文本检索结果 */
     }
   }
   if (!hits.length) hits = s.searchByKeywords(question, 8);
@@ -167,7 +132,7 @@ function register(getWindow, hooks = {}) {
   });
 
   handleStore('index:folder', (s, _e, dir, recursive) =>
-    lazy.indexer.indexFolder(dir, s, { recursive, onProgress: progress('index:progress'), manual: true })
+    lazy.indexer.indexFolder(dir, s, { recursive, onProgress: progress('index:progress') })
   );
   handleStore('index:files', async (s, _e, filePaths) => {
     const results = { ok: 0, failed: 0, errors: [] };
@@ -178,8 +143,7 @@ function register(getWindow, hooks = {}) {
         await lazy.indexer.indexFile(
           filePaths[i],
           s,
-          (p) => progress('index:progress')({ current: i + 1, total: filePaths.length, ...p }),
-          { manual: true }
+          (p) => progress('index:progress')({ current: i + 1, total: filePaths.length, ...p })
         );
         results.ok++;
       } catch (e) {
@@ -234,10 +198,6 @@ function register(getWindow, hooks = {}) {
   });
   // 按 cleanup 配置扫描全部清理文件夹（每文件夹独立天数/规则）
   handle('cleanup:scan', () => lazy.stale.scanCleanup(settings.get()));
-  handle('power:status', () => {
-    const { powerMonitor } = require('electron');
-    return { onBattery: powerMonitor.isOnBatteryPower() };
-  });
   // 渲染层上报网络是否按流量计费（navigator.connection best-effort）
   handle('network:report', (_e, metered) => {
     require('./network').setMetered(metered);
@@ -257,8 +217,7 @@ function register(getWindow, hooks = {}) {
           r = await lazy.indexer.indexFile(
             norm[i].filePath,
             s,
-            (p) => progress('index:progress')({ current: i + 1, total: norm.length, ...p }),
-            { manual: true } // 手动归类不受电池暂缓限制
+            (p) => progress('index:progress')({ current: i + 1, total: norm.length, ...p })
           );
         } catch (e) {
           require('./log').log('classify', `index failed, skipped: ${path.basename(norm[i].filePath)}`, { error: String(e.message || e).slice(0, 200) });
@@ -295,10 +254,11 @@ function register(getWindow, hooks = {}) {
     if (!source) throw new Error('Provider Source was not found.');
     const provider = catalog.providerSettingsFromSource(source);
     const cfg = settings.get();
-    const next = [...cfg.providers.chat, provider];
+    const active = { ...provider, enabled: true };
+    const next = [...cfg.providers.chat.map((item) => ({ ...item, enabled: false })), active];
     const updated = settings.set({ providers: { chat: next } });
     hooks.onSettingsChanged?.(updated);
-    return { provider, settings: updated };
+    return { provider: active, settings: updated };
   });
 
   // 官方 OAuth：PKCE 在系统浏览器完成，access/refresh token 只保存于主进程的 safeStorage 密文仓库。
@@ -309,10 +269,10 @@ function register(getWindow, hooks = {}) {
       const account = await oauth.authorize(String(provider || ''));
       const preset = await oauth.oauthProviderSettings(String(provider || ''));
       const cfg = settings.get();
-      const chat = [...cfg.providers.chat];
+      const chat = cfg.providers.chat.map((item) => ({ ...item, enabled: false }));
       const index = chat.findIndex((item) => item.oauthProvider === preset.oauthProvider);
       if (index >= 0) chat[index] = { ...chat[index], ...preset, enabled: true };
-      else chat.push(preset);
+      else chat.push({ ...preset, enabled: true });
       const updated = settings.set({ providers: { chat } });
       hooks.onSettingsChanged?.(updated);
       return { ok: true, account, settings: updated };
@@ -434,5 +394,5 @@ function register(getWindow, hooks = {}) {
   });
 }
 
-// ask/getStore 供 assistant 复用；flushStore 供退出前落盘（向量库写盘已防抖）；unloadStore 托盘卸载
-module.exports = { register, ask, getStore, withStore, resumeStore, unloadStore, flushStore: () => store?.flush() };
+// ask/getStore 供 assistant 复用；flushStore 供退出前落盘（向量库写盘已防抖）
+module.exports = { register, ask, getStore, withStore, flushStore: () => store?.flush() };

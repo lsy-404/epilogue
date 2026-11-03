@@ -10,12 +10,12 @@ test('settings patches stay inside the agent allow-list', () => {
     staleDays: 45,
     providers: { chat: [{ apiKey: 'must-not-pass' }] },
     cleanup: { autoScan: true, soloMode: true },
-    app: { lowPower: false },
+    app: { avoidCloudOnMetered: false },
   });
   assert.deepEqual(result.patch, {
     staleDays: 45,
     cleanup: { autoScan: true },
-    app: { lowPower: false },
+    app: { avoidCloudOnMetered: false },
   });
   assert.deepEqual(result.rejected.sort(), ['cleanup.soloMode', 'providers']);
 });

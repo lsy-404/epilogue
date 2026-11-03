@@ -1,6 +1,6 @@
 'use strict';
-// 定期扫描过期文件。电池供电时间隔 ×3；发现结果发系统通知（点击打开窗口）。
-const { powerMonitor, Notification } = require('electron');
+// 定期扫描过期文件；发现结果发系统通知（点击打开窗口）。
+const { Notification } = require('electron');
 const settings = require('./settings');
 const stale = require('./stale');
 const { makeT } = require('../shared/locales');
@@ -10,18 +10,8 @@ let openWindow = () => {};
 let getWindow = () => null;
 let lastFound = [];
 
-function onBattery() {
-  try {
-    return powerMonitor.isOnBatteryPower();
-  } catch {
-    return false;
-  }
-}
-
 function intervalMs() {
-  const cfg = settings.get();
-  let hours = Math.max(0.25, cfg.cleanup.scanIntervalHours || 6);
-  if (cfg.app.lowPower && onBattery()) hours *= 3; // 电池模式放缓
+  const hours = Math.max(0.25, settings.get().cleanup.scanIntervalHours || 6);
   return hours * 3600 * 1000;
 }
 
@@ -49,7 +39,7 @@ async function soloProcess(found) {
       let r = store.get(f.filePath);
       if (!r) {
         try {
-          r = await indexer.indexFile(f.filePath, store); // manual:false —— 沿用电池暂缓等后台约束
+          r = await indexer.indexFile(f.filePath, store);
         } catch (e) {
           log('solo', `index failed: ${f.fileName}`, { error: String(e.message || e).slice(0, 120) });
           continue;
@@ -113,9 +103,6 @@ function arm() {
 function start(opts) {
   openWindow = opts.openWindow;
   getWindow = opts.getWindow;
-  // 电源状态切换时重排计时器
-  powerMonitor.on('on-battery', arm);
-  powerMonitor.on('on-ac', arm);
   arm();
 }
 
@@ -124,4 +111,4 @@ function restart() {
   arm();
 }
 
-module.exports = { start, restart, tick, onBattery, getLastFound: () => lastFound };
+module.exports = { start, restart, tick, getLastFound: () => lastFound };

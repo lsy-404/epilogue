@@ -5,7 +5,6 @@ const path = require('path');
 const llm = require('./llm');
 const settings = require('./settings');
 const { kindOf } = require('./extractors'); // extract 本体在 modelHost 子进程执行
-const { transcribeMedia } = require('./media');
 
 const SKIP_DIRS = new Set(['node_modules', '.git', '.Trash', 'Library', '$RECYCLE.BIN', 'System Volume Information']);
 const MAX_FILE_SIZE = 2 * 1024 * 1024 * 1024; // 2GB 以上直接跳过
@@ -36,7 +35,7 @@ function localMeta(content, fileName, filePath = '') {
   return { summary, keywords };
 }
 
-async function indexFile(filePath, store, onProgress = () => {}, { manual = false, nameOnly = false } = {}) {
+async function indexFile(filePath, store, onProgress = () => {}, { nameOnly = false } = {}) {
   const { log } = require('./log');
   const t0 = Date.now();
   const cfg = settings.get();
@@ -45,21 +44,11 @@ async function indexFile(filePath, store, onProgress = () => {}, { manual = fals
   // 超大文件不抛错：降级为文件名索引（不读内容），仍可凭文件名/目录归类与检索
   if (stat.size > MAX_FILE_SIZE) nameOnly = true;
 
-  // 1. 提取文本（media 走 whisper）；nameOnly：只索引文件名，不读内容（云占位文件读内容会触发下载）
+  // 1. 提取文本；nameOnly：只索引文件名，不读内容（云占位文件读内容会触发下载）
   const kind = kindOf(filePath);
   let content = '';
-  let transcript = '';
   if (nameOnly) {
     onProgress({ file: fileName, stage: '文件名索引…' });
-  } else if (kind === 'media') {
-    onProgress({ file: fileName, stage: '转写音视频 (Whisper)…' });
-    // 低功耗 + 电池供电：仅对后台/自动任务暂缓重型转写；用户手动发起的不受限
-    if (cfg.app.lowPower && !manual) {
-      const { powerMonitor } = require('electron');
-      if (powerMonitor.isOnBatteryPower()) throw new Error('电池模式下暂缓音视频转写（接通电源后重试）');
-    }
-    transcript = await transcribeMedia(cfg.providers.transcription, filePath, { sttMaxSeconds: cfg.extraction.sttMaxSeconds });
-    content = transcript.slice(0, cfg.extraction.maxChars);
   } else {
     onProgress({ file: fileName, stage: '提取内容…' });
     // 提取在 modelHost 子进程执行，主进程事件循环不被同步解析阻塞
@@ -73,30 +62,17 @@ async function indexFile(filePath, store, onProgress = () => {}, { manual = fals
 
   // 3. 向量化（embeddings 未配置则留空，检索自动降级关键词匹配）
   let vector = null;
-  // 图像：启用图形 embedding 且 CLIP 模型已下载 → 视觉向量（512 维，与 BGE 维度隔离）
-  if (kind === 'image' && !nameOnly && cfg.imageEmbed?.enabled) {
-    const localModels = require('./localModels');
-    if (localModels.status(cfg.imageEmbed.model).downloaded) {
-      onProgress({ file: fileName, stage: '图像向量化…' });
-      try {
-        [vector] = await localModels.imageEmbed([filePath], cfg.imageEmbed.model);
-      } catch (e) {
-        log('index', `image embed failed: ${fileName}`, { error: String(e.message || e).slice(0, 200) });
-        vector = null;
-      }
-    }
-  }
   const network = require('./network');
   const embProviders = llm.localOnlyFilter(cfg.providers.embeddings, cfg.app.avoidCloudOnMetered && network.isMetered());
   // 二进制等非文档文件（无可提取文本）不做 embedding，仅靠文件名+摘要可检索；
   // nameOnly 模式用文件名本身做向量（文件名也能参与语义检索）
-  const hasText = Boolean(content || transcript) || nameOnly;
+  const hasText = Boolean(content) || nameOnly;
   if (!vector && hasText && llm.embeddingsConfigured(embProviders)) {
     onProgress({ file: fileName, stage: '向量化…' });
     try {
       // 末两级目录名进向量文本：文件夹归属也参与语义检索
       const dirHint = path.dirname(filePath).split(/[\\/]/).filter(Boolean).slice(-2).join('/');
-      const text = nameOnly ? `${dirHint}/${fileName}` : `${dirHint}/${fileName}\n${(content || transcript).slice(0, 2000)}`;
+      const text = nameOnly ? `${dirHint}/${fileName}` : `${dirHint}/${fileName}\n${content.slice(0, 2000)}`;
       [vector] = await llm.embedF(embProviders, [text]);
     } catch (e) {
       log('index', `embed failed: ${fileName}`, { error: String(e.message || e).slice(0, 200) });
@@ -111,7 +87,6 @@ async function indexFile(filePath, store, onProgress = () => {}, { manual = fals
     kind,
     summary: meta.summary || '',
     keywords: meta.keywords || [],
-    transcriptPreview: transcript.slice(0, 500),
     vector,
     sizeBytes: stat.size,
     fileMtime: stat.mtimeMs, // 文件日期，供 Library 滑条筛选
@@ -138,7 +113,7 @@ function* walkFiles(dir, recursive) {
 // 让出一拍事件循环：提取含同步重操作（adm-zip 等），让步保证进度 IPC 先投递到渲染层再开始干活
 const yieldLoop = () => new Promise((r) => setImmediate(r));
 
-async function indexFolder(dir, store, { recursive = true, onProgress = () => {}, manual = false } = {}) {
+async function indexFolder(dir, store, { recursive = true, onProgress = () => {} } = {}) {
   const results = { ok: 0, failed: 0, errors: [] };
   let current = 0;
   for (const file of walkFiles(dir, recursive)) {
@@ -146,7 +121,7 @@ async function indexFolder(dir, store, { recursive = true, onProgress = () => {}
     onProgress({ current, file: path.basename(file) });
     await yieldLoop();
     try {
-      await indexFile(file, store, (p) => onProgress({ current, ...p }), { manual });
+      await indexFile(file, store, (p) => onProgress({ current, ...p }));
       results.ok++;
     } catch (e) {
       results.failed++;

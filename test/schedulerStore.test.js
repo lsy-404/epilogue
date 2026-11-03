@@ -14,7 +14,6 @@ function loadScheduler(config, found, suggestions = []) {
   Module._load = function mockedLoad(request, parent, isMain) {
     if (parent?.filename === schedulerPath) {
       if (request === 'electron') return {
-        powerMonitor: { isOnBatteryPower: () => false, on() {} },
         Notification: { isSupported: () => false },
       };
       if (request === './settings') return { get: () => config };

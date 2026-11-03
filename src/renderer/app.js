@@ -734,7 +734,6 @@ for (const btn of document.querySelectorAll('.tab-btn')) {
   });
 }
 
-/* ---------- 设置：Provider 灾备列表 ---------- */
 /* ---------- IRIS Provider Source / OAuth ---------- */
 let providerSourceCatalog = [];
 let providerSourceLoaded = false;
@@ -858,6 +857,7 @@ $('#providerSourceOverlay').addEventListener('click', async (e) => {
   }
 });
 $('#providerSourceCustom').addEventListener('click', () => {
+  currentSettings.providers.chat.forEach((item) => { item.enabled = false; });
   currentSettings.providers.chat.push({ name: '', protocol: 'openai-compatible', baseUrl: '', apiKey: '', model: '' });
   renderProviders('chat');
   closeProviderSource();
@@ -865,9 +865,9 @@ $('#providerSourceCustom').addEventListener('click', () => {
 });
 }
 
-const PROVIDER_TYPES = ['chat', 'embeddings', 'transcription'];
+const PROVIDER_TYPES = ['chat', 'embeddings'];
 
-const LOCAL_TASK = { transcription: 'automatic-speech-recognition', embeddings: 'feature-extraction' };
+const LOCAL_TASK = { embeddings: 'feature-extraction' };
 
 function applyProviderProtocolDefaults(provider) {
   if (provider.protocol === 'anthropic-messages') {
@@ -998,20 +998,20 @@ function speedOf(p) {
   return s.speed ? s.speed | 0 : null;
 }
 
-// 行布局：拖动手柄 | 内容 | …… | 启用（右侧）| ✕ 删除（最右，内置/本机无）
+// 行布局：内容 | …… | 启用（右侧，同类仅一个生效）| ✕ 删除（最右，内置/本机无）
 function renderProviders(type) {
   const list = currentSettings.providers[type];
   const container = $(`#providers-${type}`);
+  const activeIndex = list.findIndex((p) => p.enabled !== false);
   container.innerHTML = list
     .map((p, i) => {
       const locked = p.keyless || p.type === 'local'; // 免 Key/本机连接锁定关键字段（无 tag）
       const oauth = Boolean(p.oauthProvider);
-      const enableBox = `<label class="check enable-box" title="${t('enabled_label')}"><input type="checkbox" data-p-en="${type}.${i}" ${p.enabled !== false ? 'checked' : ''} /></label>`;
+      const enableBox = `<label class="check enable-box" title="${t('enabled_label')}"><input type="checkbox" data-p-en="${type}.${i}" ${i === activeIndex ? 'checked' : ''} /></label>`;
       const xBtn = locked ? '<span class="x-spacer"></span>' : `<button class="x-btn" data-p-rm="${type}.${i}" title="${t('remove')}">✕</button>`;
       if (p.type === 'local') {
         // 本机 embedding：模型名 + 支持文件状态 + 下载/删除 + 进度条
-        return `<div class="provider-row local-row" draggable="true" data-drag="${type}.${i}">
-          <span class="drag-handle">⠿</span>
+        return `<div class="provider-row local-row">
           <span class="model-name">${esc(p.name)} · ${esc(p.model)}</span>
           <span class="badge" data-model-status="${esc(p.model)}">…</span>
           <button class="mini-btn hidden" data-model-dl="${type}.${i}">${t('model_download')}</button>
@@ -1021,11 +1021,7 @@ function renderProviders(type) {
           ${enableBox}${xBtn}
         </div>`;
       }
-      // 云端转写无轻量测试手段（需上传音频）→ 空占位保持列对齐
-      const testBtn =
-        type === 'transcription'
-          ? '<span class="x-spacer"></span>'
-          : `<button class="mini-btn" data-p-test="${type}.${i}">${t('prov_test')}</button>`;
+      const testBtn = `<button class="mini-btn" data-p-test="${type}.${i}">${t('prov_test')}</button>`;
       const protocol = p.protocol || 'openai-completions';
       const protocolSelect = type === 'chat'
         ? `<select class="provider-protocol" data-p="${type}.${i}.protocol" title="${t('ph_protocol')}" ${locked || oauth ? 'disabled' : ''}>
@@ -1035,7 +1031,7 @@ function renderProviders(type) {
             <option value="anthropic-messages" ${protocol === 'anthropic-messages' ? 'selected' : ''}>${t('proto_anthropic')}</option>
           </select>`
         : '';
-      const modelField = !locked && type !== 'transcription'
+      const modelField = !locked
         ? `<div class="provider-model-field">
             <input type="text" data-p="${type}.${i}.model" value="${esc(p.model || '')}" placeholder="${t('ph_model')}" />
             <button type="button" class="model-discover-btn" data-p-models="${type}.${i}" title="${t('models_discover')}" aria-label="${t('models_discover')}">⌄</button>
@@ -1047,8 +1043,7 @@ function renderProviders(type) {
       const credentialField = oauth
         ? `<button type="button" class="mini-btn oauth-manage-btn" data-oauth-manage="${esc(p.oauthProvider)}">${t('oauth_connected')}</button>`
         : `<input type="password" data-p="${type}.${i}.apiKey" value="${esc(p.apiKey || '')}" placeholder="${esc(p.source?.env?.[0] || (p.keyless ? t('ph_keyless') : t('ph_apikey')))}" ${locked && p.baseUrl?.includes('pollinations') ? 'disabled' : ''} />`;
-      return `<div class="provider-row" draggable="true" data-drag="${type}.${i}">
-        <span class="drag-handle">⠿</span>
+      return `<div class="provider-row">
         <input type="text" data-p="${type}.${i}.name" value="${esc(p.name || '')}" placeholder="${t('ph_name')}" ${locked ? 'disabled' : ''} />
         ${protocolSelect}
         <input type="text" data-p="${type}.${i}.baseUrl" value="${esc(p.baseUrl || '')}" placeholder="${t('ph_baseurl')}" ${locked || oauth ? 'disabled' : ''} />
@@ -1103,7 +1098,9 @@ document.body.addEventListener('change', (e) => {
   const en = e.target.closest('[data-p-en]');
   if (en) {
     const [type, i] = en.dataset.pEn.split('.');
-    currentSettings.providers[type][+i].enabled = en.checked;
+    // 每类能力只启用一个 provider
+    currentSettings.providers[type].forEach((p, index) => { p.enabled = index === +i ? en.checked : en.checked ? false : p.enabled; });
+    renderProviders(type);
   }
 });
 
@@ -1195,124 +1192,6 @@ document.body.addEventListener('click', async (e) => {
   }
 });
 
-/* ---------- Provider 拖动排序 ---------- */
-let dragSrc = null;
-document.body.addEventListener('dragstart', (e) => {
-  const row = e.target.closest('[data-drag]');
-  if (row) {
-    dragSrc = row.dataset.drag;
-    row.classList.add('dragging');
-  }
-});
-document.body.addEventListener('dragover', (e) => {
-  if (e.target.closest('[data-drag]')) e.preventDefault();
-});
-document.body.addEventListener('drop', (e) => {
-  const row = e.target.closest('[data-drag]');
-  if (!row || !dragSrc) return;
-  e.preventDefault();
-  const [srcType, srcI] = dragSrc.split('.');
-  const [dstType, dstI] = row.dataset.drag.split('.');
-  if (srcType === dstType && srcI !== dstI) {
-    const list = currentSettings.providers[srcType];
-    const [moved] = list.splice(+srcI, 1);
-    list.splice(+dstI, 0, moved);
-    renderProviders(srcType);
-    autoSaveNow('settings');
-  }
-  dragSrc = null;
-});
-document.body.addEventListener('dragend', () => {
-  document.querySelectorAll('.dragging').forEach((el) => el.classList.remove('dragging'));
-  dragSrc = null;
-});
-
-/* ---------- 图形 Embedding（多方案模型列表，按需下载，下载后方可启用） ---------- */
-const IMG_MODELS = window.EpilogueImageModels.IMAGE_MODELS;
-function imgModel() {
-  return currentSettings.imageEmbed?.model || window.EpilogueImageModels.DEFAULT_IMAGE_MODEL;
-}
-
-function renderImgModels() {
-  const cur = imgModel();
-  $('#imgModelList').innerHTML = IMG_MODELS.map(
-    (m) => `<div class="provider-row local-row">
-      <label class="check" style="flex-shrink:0">
-        <input type="radio" name="imgModelPick" data-img-pick="${esc(m.id)}" ${m.id === cur ? 'checked' : ''} />
-        <span class="model-name"><strong>${esc(m.label)}</strong></span>
-      </label>
-      <span class="hint">${esc(t(m.descKey))} · ${esc(m.size)}</span>
-      <span class="badge" data-model-status="${esc(m.id)}">…</span>
-      <button class="mini-btn hidden" data-img-dl="${esc(m.id)}">${t('model_download')}</button>
-      <button class="mini-btn danger hidden" data-img-del="${esc(m.id)}">${t('model_delete')}</button>
-      <span class="spacer"></span>
-      <div class="bar hidden" data-model-bar="${esc(m.id)}"><div class="bar-fill"></div></div>
-    </div>`
-  ).join('');
-  refreshImgStatuses();
-}
-
-async function refreshImgStatuses() {
-  let curReady = false;
-  for (const m of IMG_MODELS) {
-    const s = await api.modelStatus(m.id);
-    const el = document.querySelector(`[data-model-status="${CSS.escape(m.id)}"]`);
-    if (el) {
-      el.textContent = s.downloaded ? t('model_ready', { size: fmtSize(s.sizeBytes) }) : t('model_absent');
-      el.classList.toggle('ok', s.downloaded);
-    }
-    document.querySelector(`[data-img-dl="${CSS.escape(m.id)}"]`)?.classList.toggle('hidden', s.downloaded);
-    document.querySelector(`[data-img-del="${CSS.escape(m.id)}"]`)?.classList.toggle('hidden', !s.downloaded);
-    if (m.id === imgModel()) curReady = s.downloaded;
-  }
-  $('#imgEnabled').disabled = !curReady; // 所选模型下载后方可启用
-  $('#imgEnabled').checked = curReady && currentSettings.imageEmbed?.enabled === true;
-  $('#imgGpu').checked = (currentSettings.imageEmbed?.device || 'auto') !== 'cpu';
-}
-
-$('#imgModelList').addEventListener('click', async (e) => {
-  const dl = e.target.closest('[data-img-dl]');
-  if (dl) {
-    const id = dl.dataset.imgDl;
-    dl.disabled = true;
-    dl.classList.add('hidden');
-    const st = document.querySelector(`[data-model-status="${CSS.escape(id)}"]`);
-    if (st) st.textContent = t('model_init');
-    setBar(document.querySelector(`[data-model-bar="${CSS.escape(id)}"]`), null);
-    try {
-      await api.modelDownload('clip-image', id);
-    } catch (err) {
-      $('#saveHint').textContent = t('err', { msg: err.message.slice(0, 160) });
-      setBar(document.querySelector(`[data-model-bar="${CSS.escape(id)}"]`), 100);
-    }
-    dl.disabled = false;
-    refreshImgStatuses();
-  }
-  const del = e.target.closest('[data-img-del]');
-  if (del) {
-    await api.modelDelete(del.dataset.imgDel);
-    if (del.dataset.imgDel === imgModel()) currentSettings = await api.setSettings({ imageEmbed: { enabled: false } });
-    refreshImgStatuses();
-  }
-});
-$('#imgModelList').addEventListener('change', async (e) => {
-  const pick = e.target.closest('[data-img-pick]');
-  if (pick) {
-    currentSettings = await api.setSettings({ imageEmbed: { model: pick.dataset.imgPick } });
-    refreshImgStatuses();
-    flashSaved('settings');
-  }
-});
-$('#imgEnabled').addEventListener('change', async () => {
-  currentSettings = await api.setSettings({ imageEmbed: { enabled: $('#imgEnabled').checked } });
-  flashSaved('settings');
-});
-$('#imgGpu').addEventListener('change', async () => {
-  // 设置变更触发模型子进程重启（applyAppSettings），新 device 经 env 生效
-  currentSettings = await api.setSettings({ imageEmbed: { device: $('#imgGpu').checked ? 'auto' : 'cpu' } });
-  flashSaved('settings');
-});
-
 document.body.addEventListener('input', (e) => {
   const bind = e.target.closest('[data-p]');
   if (bind) {
@@ -1330,17 +1209,6 @@ document.body.addEventListener('click', (e) => {
   if (rm) {
     const [type, i] = rm.dataset.pRm.split('.');
     currentSettings.providers[type].splice(+i, 1);
-    renderProviders(type);
-    autoSaveNow('settings');
-  }
-  const add = e.target.closest('[data-add-provider]');
-  if (add) {
-    const type = add.dataset.addProvider;
-    if (type === 'chat') {
-      window.openModelAuth?.();
-      return;
-    }
-    currentSettings.providers[type].push({ name: '', baseUrl: '', apiKey: '', model: '' });
     renderProviders(type);
     autoSaveNow('settings');
   }
@@ -1362,7 +1230,6 @@ function loadSettingsForm(st) {
   $('#prefQuickSearchShortcut').value = st.app.quickSearchShortcut ?? 'CommandOrControl+Shift+Space';
   syncSelectProxy($('#prefQuickSearchShortcut'));
   refreshQuickSearchStatus();
-  $('#prefLowPower').checked = st.app.lowPower;
   $('#prefMetered').checked = st.app.avoidCloudOnMetered;
   $('#prefAutoScan').checked = st.cleanup.autoScan;
   $('#prefInterval').value = st.cleanup.scanIntervalHours;
@@ -1371,17 +1238,12 @@ function loadSettingsForm(st) {
   $('#extXlsxMode').value = st.extraction.xlsxMode;
   $('#extPdfPages').value = st.extraction.pdfMaxPages;
   $('#extMaxChars').value = st.extraction.maxChars;
-  $('#extSttSecs').value = st.extraction.sttMaxSeconds;
   $('#prefSolo').checked = st.cleanup.soloMode === true;
   $('#prefTrash').checked = st.cleanup.allowTrash === true;
   renderDestList(st.destinations);
   renderCleanupFolders();
   renderSearchSeg();
   renderChat();
-  renderImgModels();
-  api.powerStatus().then((p) => {
-    $('#powerBadge').textContent = p.onBattery ? t('on_battery') : t('on_ac');
-  });
   syncSelectProxies();
 }
 
@@ -1530,7 +1392,6 @@ function collectSettingsPatch() {
       launchAtLogin: $('#prefLogin').checked,
       trayKeepAlive: $('#prefTray').checked,
       quickSearchShortcut: $('#prefQuickSearchShortcut').value,
-      lowPower: $('#prefLowPower').checked,
       avoidCloudOnMetered: $('#prefMetered').checked,
     },
     extraction: {
@@ -1538,7 +1399,6 @@ function collectSettingsPatch() {
       xlsxMode: $('#extXlsxMode').value,
       pdfMaxPages: Math.max(1, parseInt($('#extPdfPages').value, 10) || 30),
       maxChars: Math.max(500, parseInt($('#extMaxChars').value, 10) || 12000),
-      sttMaxSeconds: Math.max(30, parseInt($('#extSttSecs').value, 10) || 300),
     },
   };
 }

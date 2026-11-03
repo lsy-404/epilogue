@@ -60,10 +60,8 @@ const SETTINGS_SCHEMA = {
     xlsxMode: { enum: ['full', 'headers'] },
     pdfMaxPages: { type: 'int', min: 1, max: 500 },
     maxChars: { type: 'int', min: 500, max: 100000 },
-    sttMaxSeconds: { type: 'int', min: 30, max: 7200 },
   },
   app: {
-    lowPower: { type: 'bool' },
     avoidCloudOnMetered: { type: 'bool' },
   },
 };

@@ -183,7 +183,7 @@ function extractText(filePath, opts) {
 
 const DEFAULT_OPTS = { officeMode: 'full', xlsxMode: 'full', pdfMaxPages: 30, maxChars: MAX_CHARS };
 
-// 返回 {kind, content}；media 类型由 media.js 单独处理。opts 来自 settings.extraction。
+// 返回 {kind, content}；音视频、图片等无可提取文本的类型 content 为空。opts 来自 settings.extraction。
 async function extract(filePath, opts = {}) {
   const o = { ...DEFAULT_OPTS, ...opts };
   const kind = kindOf(filePath);
@@ -201,4 +201,4 @@ async function extract(filePath, opts = {}) {
   }
 }
 
-module.exports = { extract, kindOf, MEDIA_EXTS, MAX_CHARS, LIMITS, decodeEntryName };
+module.exports = { extract, kindOf, MAX_CHARS, LIMITS, decodeEntryName };

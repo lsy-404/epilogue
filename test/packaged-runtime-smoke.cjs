@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { createRequire } = require('node:module');
-const { execFileSync, spawnSync } = require('node:child_process');
+const { spawnSync } = require('node:child_process');
 const { pathToFileURL } = require('node:url');
 
 if (!process.versions.electron) {
@@ -51,8 +51,6 @@ app.whenReady().then(async () => {
   assert.equal(tensor.size, 1);
   const png = await packaged('sharp')({ create: { width: 2, height: 2, channels: 3, background: 'white' } }).png().toBuffer();
   assert.equal(png[1], 0x50);
-  const ffmpegVersion = execFileSync(packaged('ffmpeg-static'), ['-version'], { encoding: 'utf8', windowsHide: true, timeout: 10000 });
-  assert.match(ffmpegVersion, /ffmpeg version/);
   session.defaultSession.webRequest.onBeforeRequest((details, callback) => callback({ cancel: /^https?:/.test(details.url) }));
   const settings = packaged('./src/main/settings');
   settings.set({ tosAccepted: true, cleanup: { autoScan: false, folders: [] } });
@@ -69,7 +67,7 @@ app.whenReady().then(async () => {
   }
   window.destroy();
   clearTimeout(timeout);
-  console.log(JSON.stringify({ packagedRuntime: 'passed', native: ['onnx', 'sharp', 'ffmpeg'], auth: 'passed', renderer: 'passed', quickSearchAssets: 'passed' }));
+  console.log(JSON.stringify({ packagedRuntime: 'passed', native: ['onnx', 'sharp'], auth: 'passed', renderer: 'passed', quickSearchAssets: 'passed' }));
   app.exit(0);
 }).catch((error) => {
   console.error(error);

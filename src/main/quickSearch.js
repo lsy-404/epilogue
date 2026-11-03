@@ -10,7 +10,7 @@ const { queryLibrary } = require('./libraryQuery');
 const DEFAULT_ACCELERATOR = 'CommandOrControl+Shift+Space';
 const SHORTCUTS = new Set([DEFAULT_ACCELERATOR, 'CommandOrControl+Alt+Space', 'CommandOrControl+Shift+F', '']);
 
-function createQuickSearch({ openWindow, getMainWindow }) {
+function createQuickSearch({ openWindow }) {
   let popup = null;
   let registered = false;
   let handlersRegistered = false;
@@ -73,7 +73,6 @@ function createQuickSearch({ openWindow, getMainWindow }) {
       openWindow();
       return false;
     }
-    ipc.resumeStore();
     if (popup && !popup.isDestroyed()) {
       position();
       popup.show();
@@ -112,10 +111,6 @@ function createQuickSearch({ openWindow, getMainWindow }) {
     });
     popup.on('closed', () => {
       popup = null;
-      if (!getMainWindow?.()) {
-        ipc.unloadStore();
-        require('./localModels').idleShutdown();
-      }
     });
     popup.on('blur', () => {
       if (popup && !popup.isDestroyed()) popup.destroy();

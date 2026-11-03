@@ -18,7 +18,7 @@ function settingsDigest(cfg) {
       folders: cfg.cleanup.folders.map((folder) => folder.path),
     },
     extraction: cfg.extraction,
-    app: { lowPower: cfg.app.lowPower, avoidCloudOnMetered: cfg.app.avoidCloudOnMetered },
+    app: { avoidCloudOnMetered: cfg.app.avoidCloudOnMetered },
   };
 }
 

@@ -1,6 +1,5 @@
 'use strict';
 const { app, BrowserWindow, Tray, Menu, nativeImage } = require('electron');
-const os = require('os');
 const path = require('path');
 const settings = require('./settings');
 const ipc = require('./ipc');
@@ -9,13 +8,8 @@ const { makeT } = require('../shared/locales');
 const { isTrustedRendererNavigation } = require('./runtimeSecurity');
 const { createQuickSearch } = require('./quickSearch');
 
-// ---- 低占用：限制 V8 堆、暴露 gc（托盘 trim 用）----
-app.commandLine.appendSwitch('js-flags', '--max-old-space-size=512 --expose-gc');
-const bootCfg = settings.get();
-// Fluent/Acrylic surfaces need GPU compositing. The old lowPower path forced
-// Chromium onto D3D11 WARP and made every scroll/overlay repaint in software.
-// Keep an explicit emergency escape hatch for broken GPU drivers instead of
-// coupling renderer acceleration to background-task throttling.
+app.commandLine.appendSwitch('js-flags', '--max-old-space-size=512');
+// Fluent/Acrylic surfaces need GPU compositing; keep an escape hatch for broken GPU drivers.
 if (process.env.EPILOGUE_DISABLE_GPU === '1') app.disableHardwareAcceleration();
 
 const ICON = path.join(__dirname, '..', '..', 'build', 'icon.png');
@@ -39,8 +33,6 @@ if (!app.requestSingleInstanceLock()) {
 
 // 托盘常驻模式下不预载 UI：窗口只在打开时创建，关闭即销毁，渲染进程内存随之释放
 function openWindow(view) {
-  ipc.resumeStore();
-  require('./localModels').cancelIdleShutdown();
   if (process.platform === 'darwin') app.dock?.show(); // 托盘态隐藏的 Dock 随窗口恢复
   if (win && !win.isDestroyed()) {
     win.show();
@@ -83,24 +75,8 @@ function openWindow(view) {
   });
   win.on('closed', () => {
     win = null;
-    // 托盘纯保活：卸索引数据、空闲时关停模型子进程、主动 GC 收缩堆 ——
-    // 托盘态只剩 托盘图标 + 定时器 + 设置缓存；一切按需惰性重建
-    if (!quickSearch?.isOpen()) {
-      ipc.unloadStore();
-      require('./localModels').idleShutdown();
-    }
     // 托盘驻留时不占 Dock：纯托盘存在，重开窗口时恢复
     if (process.platform === 'darwin' && settings.get().app.trayKeepAlive) app.dock?.hide();
-    setTimeout(() => {
-      try {
-        global.gc?.();
-        global.gc?.();
-        const mu = process.memoryUsage();
-        require('./log').log('app', 'tray trim done', { heapMB: Math.round(mu.heapUsed / 1048576), rssMB: Math.round(mu.rss / 1048576) });
-      } catch {
-        /* gc 不可用时静默 */
-      }
-    }, 1000);
   });
 }
 
@@ -167,14 +143,6 @@ app.whenReady().then(() => {
   // Windows/Linux otherwise inherit Electron's default File/Edit/View menu.
   // Epilogue uses its own WinUI commands and keeps only the explicit tray menu.
   if (process.platform !== 'darwin') Menu.setApplicationMenu(null);
-  // 默认低优先级，尽量不抢前台资源
-  if (bootCfg.app.lowPower) {
-    try {
-      os.setPriority(process.pid, 10);
-    } catch {
-      /* 平台不支持 */
-    }
-  }
   if (process.platform === 'darwin' && app.dock) {
     try {
       app.dock.setIcon(ICON);
@@ -186,7 +154,7 @@ app.whenReady().then(() => {
   if (!settings.get().stats.firstRunAt) settings.set({ stats: { firstRunAt: Date.now() } });
   settings.seedCleanupFolders(); // 识别 下载/桌面 → 添加为未启用条目（存量用户；新用户在 folders:detect 后）
   ipc.register(() => win, { onSettingsChanged: applyAppSettings, getQuickSearchStatus: () => quickSearch?.status?.() });
-  quickSearch = createQuickSearch({ openWindow, getMainWindow: () => win });
+  quickSearch = createQuickSearch({ openWindow });
   quickSearch.start();
   createTray();
   scheduler.start({ openWindow, getWindow: () => win });

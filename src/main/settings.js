@@ -6,18 +6,13 @@ const path = require('path');
 
 const DEFAULTS = {
   version: 4,
-  // 每类按数组顺序灾备：前一个失败自动尝试下一个
+  // 每类能力只使用数组中第一个启用的 provider
   providers: {
     chat: [],
-    // 默认本机 BGE 中文 embedding（免费、离线、大陆可用——经 hf-mirror 下载）；可追加云端 API 作灾备
+    // 默认本机 BGE 中文 embedding（免费、离线、大陆可用——经 hf-mirror 下载）
     embeddings: [
       { name: '本机 BGE 中文', type: 'local', model: 'Xenova/bge-small-zh-v1.5', keyless: true },
       { name: 'OpenAI', baseUrl: 'https://api.openai.com/v1', apiKey: '', model: 'text-embedding-3-small' },
-    ],
-    // 默认两条本机 Whisper（离线，音频不出本机）：低精度启用、高精度按需勾选；可「添加」云端 OpenAI-compatible 转写作灾备
-    transcription: [
-      { name: '本机 Whisper 低精度', type: 'local', model: 'Xenova/whisper-tiny', keyless: true },
-      { name: '本机 Whisper 高精度', type: 'local', model: 'Xenova/whisper-small', keyless: true, enabled: false },
     ],
   },
   providerRouting: {},
@@ -44,22 +39,17 @@ const DEFAULTS = {
     quickSearchShortcut: 'CommandOrControl+Shift+Space',
     launchAtLogin: false,
     trayKeepAlive: true, // 关闭窗口驻留托盘而非退出
-    lowPower: true, // 低占用：低进程优先级；保留 UI 的 GPU 合成，电池模式降速并跳过转写
     hfMirror: 'https://hf-mirror.com', // 本机模型下载镜像（大陆可用），置空走 huggingface.co
-    avoidCloudOnMetered: true, // 按流量计费网络时避免使用云 embedding（whisper 本就仅本机）
+    avoidCloudOnMetered: true, // 按流量计费网络时避免使用云 embedding
   },
   // 寻物默认模式：keyword 关键字 / match embedding 匹配度 / ai AI 搜索
   searchMode: 'ai',
-  // 图形 embedding：本机 CLIP 系（按需下载，下载后方可启用）；默认中文优化 Chinese-CLIP；
-  // device: 'auto'（按平台尝试 GPU，失败回退 CPU）| 'cpu'
-  imageEmbed: { enabled: false, model: 'Xenova/chinese-clip-vit-base-patch16', device: 'auto' },
   // 内容提取策略（设置-提取 选项卡）
   extraction: {
     officeMode: 'full', // full | head —— Word/PPT 完整读取或只读开头
     xlsxMode: 'full', // full | headers —— Excel 全部内容或仅表头+前几行
     pdfMaxPages: 30,
     maxChars: 12000, // 送入 LLM 的字符上限
-    sttMaxSeconds: 300, // 本地转写默认只跑前 5 分钟
   },
   stats: {
     firstRunAt: null, // 首次运行时间（计算「已陪伴天数」）
@@ -107,28 +97,12 @@ function isUnconfiguredLegacyFreeProvider(provider) {
 // v1（单 provider 对象）→ v2（数组）。无 Key 的旧条目直接丢弃，让内置默认值生效。
 function migrate(parsed) {
   if (parsed.providers) {
-    for (const k of ['chat', 'embeddings', 'transcription']) {
+    for (const k of ['chat', 'embeddings']) {
       const v = parsed.providers[k];
       if (v && !Array.isArray(v)) {
         parsed.providers[k] = v.apiKey ? [{ name: `${k} (迁移)`, ...v }] : undefined;
         if (!parsed.providers[k]) delete parsed.providers[k];
       }
-    }
-    // v2.5：转写改统一 provider 列表 —— 本机两档拆成独立条目（低 tiny / 高 small），云端条目恢复保留（撤销 v2.3 剔除）
-    const tr = parsed.providers.transcription;
-    if (Array.isArray(tr)) {
-      const locals = tr.filter((p) => p.type === 'local');
-      const clouds = tr.filter((p) => p.type !== 'local');
-      if (locals.length === 2 && locals.every((p) => !p.quality)) {
-        // 已是拆分形态，仅兜底清理
-      } else {
-        // 旧形态：单条 local 带 quality（或缺失）→ 拆两条，旧精度对应的条目启用并置顶
-        const oldHigh = locals.some((p) => p.quality === 'high' || /small/.test(p.model || ''));
-        const tiny = { name: '本机 Whisper 低精度', type: 'local', model: 'Xenova/whisper-tiny', keyless: true, enabled: !oldHigh };
-        const small = { name: '本机 Whisper 高精度', type: 'local', model: 'Xenova/whisper-small', keyless: true, enabled: oldHigh };
-        parsed.providers.transcription = oldHigh ? [small, tiny, ...clouds] : [tiny, small, ...clouds];
-      }
-      for (const p of parsed.providers.transcription) delete p.quality;
     }
     // v2.2：embeddings 默认本机 BGE —— 旧数组里没有 local 条目时置顶补上
     const em = parsed.providers.embeddings;
@@ -153,10 +127,6 @@ function migrate(parsed) {
     }
   }
   parsed.version = 4;
-  // v2.8：图形 embedding 默认升级为中文优化 Chinese-CLIP —— 仅当用户从未启用且仍为旧默认（未投入）时升级
-  if (parsed.imageEmbed && parsed.imageEmbed.enabled !== true && parsed.imageEmbed.model === 'Xenova/clip-vit-base-patch32') {
-    parsed.imageEmbed.model = 'Xenova/chinese-clip-vit-base-patch16';
-  }
   // v2.7：目标索引 perFolder 由 bool（仅内容）升级为 { content, cloud }；cloud 继承旧全局 cloudContent
   if (parsed.destIndex?.perFolder) {
     const inheritCloud = parsed.destIndex.cloudContent === true;

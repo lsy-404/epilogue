@@ -9,9 +9,9 @@ const test = require('node:test');
 function load(overrides = {}) {
   const handlers = new Map(); const windows = []; const app = new EventEmitter();
   const settings = { get: () => ({ tosAccepted: overrides.tosAccepted ?? true, language: 'en' }) };
-  const file = process.execPath; const counters = { unload: 0, idle: 0, reveal: 0, focus: 0 };
+  const file = process.execPath; const counters = { reveal: 0, focus: 0 };
   const store = { all: () => [], get: (p) => p === file ? { filePath: p } : null };
-  const ipc = { resumeStore() {}, unloadStore: () => counters.unload++, withStore: async (fn) => fn(store) };
+  const ipc = { withStore: async (fn) => fn(store) };
   const shell = { openPath: async () => overrides.openError || '', showItemInFolder: () => counters.reveal++ };
   const shortcutCalls = { register: [], unregister: [] };
   const shortcut = { register: (key) => { shortcutCalls.register.push(key); return overrides.shortcut ?? true; }, unregister: (key) => shortcutCalls.unregister.push(key) };
@@ -23,9 +23,9 @@ function load(overrides = {}) {
   }
   const electron = { app, BrowserWindow: FakeWindow, globalShortcut: shortcut, ipcMain: { handle: (channel, fn) => handlers.set(channel, fn) }, screen: { getCursorScreenPoint: () => ({ x: 0, y: 0 }), getDisplayNearestPoint: () => ({ workArea: { x: 0, y: 0, width: 1200, height: 800 } }) }, shell };
   const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'main', 'quickSearch.js'), 'utf8'); const module = { exports: {} };
-  const localRequire = (request) => ({ electron, './settings': settings, './ipc': ipc, './libraryQuery': { queryLibrary: () => ({ rows: [] }) }, './localModels': { idleShutdown: () => counters.idle++ } }[request] || require(request));
+  const localRequire = (request) => ({ electron, './settings': settings, './ipc': ipc, './libraryQuery': { queryLibrary: () => ({ rows: [] }) } }[request] || require(request));
   vm.runInNewContext(source, { require: localRequire, module, exports: module.exports, __dirname: path.join(__dirname, '..', 'src', 'main'), process, console });
-  let opened = 0; const controller = module.exports.createQuickSearch({ openWindow: () => opened++, getMainWindow: () => overrides.mainWindow || null });
+  let opened = 0; const controller = module.exports.createQuickSearch({ openWindow: () => opened++ });
   return { controller, handlers, windows, counters, opened: () => opened, file, shortcutCalls };
 }
 
@@ -58,8 +58,8 @@ test('open and reveal require indexed existing paths and surface shell failures'
 });
 
 test('popup reuse, navigation denial, and destruction respect lifecycle', () => {
-  const live = load({ mainWindow: {} }); live.controller.show(); const first = live.windows[0]; assert.equal(first.windowOpenHandler().action, 'deny');
+  const live = load(); live.controller.show(); const first = live.windows[0]; assert.equal(first.windowOpenHandler().action, 'deny');
   const navigate = { preventDefault: () => { navigate.prevented = true; } }; first.webContents.emit('will-navigate', navigate); assert.equal(navigate.prevented, true);
-  live.controller.show(); assert.equal(live.windows.length, 1); assert.equal(live.counters.focus > 0, true); first.destroy(); assert.equal(live.counters.unload, 0); assert.equal(live.counters.idle, 0);
-  const idle = load(); idle.controller.show(); idle.windows[0].destroy(); assert.equal(idle.counters.unload, 1); assert.equal(idle.counters.idle, 1); idle.controller.show(); assert.equal(idle.windows.length, 2);
+  live.controller.show(); assert.equal(live.windows.length, 1); assert.equal(live.counters.focus > 0, true); first.destroy();
+  const idle = load(); idle.controller.show(); idle.windows[0].destroy(); idle.controller.show(); assert.equal(idle.windows.length, 2);
 });

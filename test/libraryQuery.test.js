@@ -9,7 +9,7 @@ const records = Array.from({ length: 1001 }, (_, index) => ({
   filePath: `/files/${index}.txt`, fileName: `${index}.txt`, kind: 'text',
   summary: index % 2 ? '研究报告' : 'Notes', keywords: index % 3 ? [] : ['PROJECT'],
   fileMtime: day * (20000 + index), indexedAt: new Date(day * (20000 + index)).toISOString(),
-  vecDim: index % 2 ? 384 : 0, transcriptPreview: 'private transcript',
+  vecDim: index % 2 ? 384 : 0,
 }));
 
 test('library pages cap transfer size and preserve record order across pages', () => {

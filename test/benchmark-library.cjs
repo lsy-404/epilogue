@@ -7,7 +7,7 @@ const records = Array.from({ length: 25000 }, (_, index) => ({
   id: `file_${index}`, filePath: `/files/project/${index}.txt`, fileName: `${index}.txt`,
   kind: 'text', summary: 'Document preview. '.repeat(10), keywords: ['project', 'document'],
   fileMtime: 1700000000000 + index * 1000, indexedAt: new Date(1700000000000 + index * 1000).toISOString(),
-  vecDim: 384, sizeBytes: 1024, indexedMode: 'full', transcriptPreview: 'Transcript. '.repeat(40),
+  vecDim: 384, sizeBytes: 1024, indexedMode: 'full',
 }));
 function measure(name, fn) {
   fn();
@@ -22,7 +22,7 @@ function measure(name, fn) {
   return { name, medianMs: +timings[3].toFixed(2), payloadBytes: Buffer.byteLength(JSON.stringify(result)) };
 }
 console.log(JSON.stringify([
-  measure('full-library-transfer', () => structuredClone(records.map((r) => ({ ...r, vector: undefined, transcriptPreview: undefined, hasVector: true })))),
+  measure('full-library-transfer', () => structuredClone(records.map((r) => ({ ...r, vector: undefined, hasVector: true })))),
   measure('paged-library-transfer', () => structuredClone(queryLibrary(records))),
   measure('full-sort-recent', () => [...records].sort((a, b) => b.indexedAt.localeCompare(a.indexedAt)).slice(0, 8)
     .map(({ filePath, fileName, kind, summary }) => ({ filePath, fileName, kind, summary }))),

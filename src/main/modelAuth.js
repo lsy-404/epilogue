@@ -182,7 +182,8 @@ async function execute(action, { signal } = {}) {
       const reconnectId = String(action.credentialId || '');
       const existing = (cfg.providers.chat || []).find((record) => routeId(record) === TRAE_PROVIDER_ID && credentialId(record) === (reconnectId || account.id));
       if (reconnectId && reconnectId !== account.id) trae.store().remove(reconnectId);
-      const chat = (cfg.providers.chat || []).filter((record) => !(routeId(record) === TRAE_PROVIDER_ID && (credentialId(record) === account.id || credentialId(record) === reconnectId)));
+      const kept = (cfg.providers.chat || []).filter((record) => !(routeId(record) === TRAE_PROVIDER_ID && (credentialId(record) === account.id || credentialId(record) === reconnectId)));
+      const chat = existing ? kept : kept.map((record) => ({ ...record, enabled: false }));
       chat.push({ id: `trae-route:${account.id}`, name: account.label || 'TRAE', protocol: 'trae', authType: 'oauth', credentialId: account.id, modelAuthProviderId: TRAE_PROVIDER_ID, model, weight: existing?.weight || 1, enabled: existing?.enabled !== false });
       settings.set({ providers: { chat } });
       return;
@@ -196,7 +197,8 @@ async function execute(action, { signal } = {}) {
     const reconnectId = String(action.credentialId || '');
     const replaced = (cfg.providers.chat || []).find((record) => reconnectId && record.authType === 'oauth' && routeId(record) === providerId && credentialId(record) === reconnectId);
     if (reconnectId && reconnectId !== id) oauth.removeAccount(definition.oauthProvider, reconnectId);
-    const chat = (cfg.providers.chat || []).filter((record) => !(record.authType === 'oauth' && routeId(record) === providerId && (credentialId(record) === id || credentialId(record) === reconnectId)));
+    const kept = (cfg.providers.chat || []).filter((record) => !(record.authType === 'oauth' && routeId(record) === providerId && (credentialId(record) === id || credentialId(record) === reconnectId)));
+    const chat = replaced ? kept : kept.map((record) => ({ ...record, enabled: false }));
     chat.push({ ...preset, ...(replaced ? { enabled: replaced.enabled, weight: replaced.weight, model: replaced.model } : {}), id: `oauth-route:${definition.oauthProvider}:${id}`, oauthAccountId: id, credentialId: id, modelAuthProviderId: providerId, weight: replaced?.weight || 1, enabled: replaced?.enabled !== false });
     settings.set({ providers: { chat } });
     return;
@@ -209,7 +211,7 @@ async function execute(action, { signal } = {}) {
     const record = providerRecord(source, apiKey, String(action.payload.label || '').trim());
     await require('./llm').testProvider('chat', record);
     const cfg = settings.get();
-    settings.set({ providers: { chat: [...(cfg.providers.chat || []), record] } });
+    settings.set({ providers: { chat: [...(cfg.providers.chat || []).map((item) => ({ ...item, enabled: false })), record] } });
     return;
   }
   if (action?.type === 'remove-credential') {

@@ -1,12 +1,9 @@
 'use strict';
 // 多协议模型客户端：chat 走 provider adapter；Compatible 自动模式复用 IRIS 同款 AI SDK；
-// embeddings / whisper 维持 OpenAI-compatible 的直接请求。
-const fs = require('fs');
-const path = require('path');
+// embeddings 维持 OpenAI-compatible 的直接请求。
 const adapters = require('./providerAdapters');
 const compatibleKeyCursors = new Map();
 let compatibleSdkPromise = null;
-let credentialRouterPromise = null;
 
 function headers(provider, extra = {}) {
   const h = { ...extra };
@@ -40,72 +37,28 @@ function localOnlyFilter(providers, localOnly) {
   return localOnly ? list.filter((p) => p.type === 'local') : list;
 }
 
-function sharedPool(provider) { return Boolean(provider?.modelAuthProviderId); }
-function routingModelId(provider) { return provider.model; }
-function routerProviderId(provider) { return String(provider.modelAuthProviderId).replace(/[^a-zA-Z0-9._-]/g, '-'); }
-function poolCredentialId(provider) { return String(provider.id || provider.credentialId); }
-function errorForRouter(error) {
-  const status = Number(String(error?.message || '').match(/HTTP\s+(\d{3})/)?.[1]);
-  return Number.isInteger(status) ? { kind: 'http', status } : { kind: 'transport' };
+// 每类能力只用一个 provider：数组中第一个启用且路由允许的条目
+function activeProvider(providers) {
+  const list = Array.isArray(providers) ? providers : [providers];
+  return list.find((provider) => provider && provider.enabled !== false && routeAllowed(provider)) || null;
 }
 
-async function routeCandidates(list) {
-  const legacy = list.filter((provider) => !sharedPool(provider));
-  const pooled = list.filter(sharedPool);
-  if (!pooled.length) return legacy;
-  const core = await import('@model-auth/core');
-  credentialRouterPromise ||= Promise.resolve(new core.CredentialRouter([]));
-  const router = await credentialRouterPromise;
-  const cfg = require('./settings').get();
-  const byCredential = new Map();
-  const routeOrder = [];
-  for (const provider of pooled) {
-    const providerId = routerProviderId(provider);
-    const credentialId = poolCredentialId(provider);
-    const modelId = routingModelId(provider);
-    if (!credentialId || !modelId) continue;
-    if (!routeOrder.includes(providerId)) routeOrder.push(providerId);
-    router.upsert(core.createCredentialMetadata({ id: credentialId, providerId, authMethod: provider.authType === 'oauth' || provider.protocol === 'trae' ? 'oauth' : 'api-key', enabled: provider.enabled !== false, weight: Number(provider.weight) || 1, modelIds: [modelId] }));
-    router.setStrategy(cfg.providerRouting?.[provider.modelAuthProviderId]?.strategy || 'round-robin', providerId);
-    router.setProviderOAuthEnabled(providerId, cfg.providerRouting?.[provider.modelAuthProviderId]?.oauthEnabled !== false);
-    byCredential.set(credentialId, provider);
-  }
-  const ordered = [];
-  for (const providerId of routeOrder) {
-    const first = pooled.find((provider) => routerProviderId(provider) === providerId && routingModelId(provider));
-    if (!first) continue;
-    for (const credential of router.candidates({ providerId, modelId: routingModelId(first) })) {
-      const provider = byCredential.get(credential.id);
-      if (provider && !ordered.includes(provider)) ordered.push(provider);
+async function withProvider(providers, fn) {
+  const provider = activeProvider(providers);
+  if (!usable(provider)) throw new Error('没有可用的 provider（请在「设置 → 能力」选择 Provider Source、连接 OAuth 或配置自定义接口）');
+  try {
+    return await fn(provider);
+  } catch (e) {
+    require('./log').log('llm', `provider failed: ${provider.name || provider.baseUrl || 'local'}`, { error: String(e.message || e).slice(0, 200) });
+    // 限流/超时：换成可操作的友好提示
+    const msg = e?.message || '';
+    if (/HTTP 429/.test(msg) || /timeout/.test(msg)) {
+      const { makeT } = require('../shared/locales');
+      const t = makeT(require('./settings').get().language);
+      throw new Error(t(/HTTP 429/.test(msg) ? 'err_busy' : 'err_timeout'));
     }
+    throw e;
   }
-  return [...ordered, ...legacy];
-}
-
-// 灾备：每个共享 provider 内按所选策略挑独立凭据；组间仍按用户配置顺序回退。
-async function withFailover(providers, fn) {
-  const list = await routeCandidates((Array.isArray(providers) ? providers : [providers]).filter((provider) => usable(provider) && routeAllowed(provider)));
-  if (!list.length) throw new Error('没有可用的 provider（请在「设置 → 能力」选择 Provider Source、连接 OAuth 或配置自定义接口）');
-  let lastErr;
-  for (const p of list) {
-    try {
-      const result = await fn(p);
-      if (sharedPool(p)) (await credentialRouterPromise)?.reportSuccess(poolCredentialId(p));
-      return result;
-    } catch (e) {
-      lastErr = e;
-      if (sharedPool(p)) (await credentialRouterPromise)?.reportError(poolCredentialId(p), errorForRouter(e));
-      require('./log').log('llm', `provider failed: ${p.name || p.baseUrl || 'local'}`, { error: String(e.message || e).slice(0, 200) });
-    }
-  }
-  // 全部失败且是限流/超时：换成可操作的友好提示
-  const msg = lastErr?.message || '';
-  if (/HTTP 429/.test(msg) || /timeout/.test(msg)) {
-    const { makeT } = require('../shared/locales');
-    const t = makeT(require('./settings').get().language);
-    throw new Error(t(/HTTP 429/.test(msg) ? 'err_busy' : 'err_timeout'));
-  }
-  throw lastErr;
 }
 
 function apiUrl(provider, endpoint) {
@@ -121,7 +74,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // 各类请求超时：免费端点可能挂起连接不响应，无超时会让 UI 永远「思考中…」，
 // 且同主机串行节流链会被一个挂死请求堵死全部后续 AI 调用
-const TIMEOUTS = { chat: 90000, embeddings: 60000, transcription: 180000, 'list models': 15000 };
+const TIMEOUTS = { chat: 90000, embeddings: 60000, 'list models': 15000 };
 
 // 自动重试：429 最多 5 次（3s 起指数退避 + 抖动，免费通道拥挤是常态）；5xx 最多 3 次；尊重 Retry-After
 async function fetchWithRetry(url, options, what, retries = 3) {
@@ -133,7 +86,7 @@ async function fetchWithRetry(url, options, what, retries = 3) {
     try {
       res = await fetch(url, { ...options, signal: AbortSignal.timeout(TIMEOUTS[what] || 90000) });
     } catch (e) {
-      // 超时不重试（已等足量时间），直接抛给灾备链切换下一个 provider
+      // 超时不重试（已等足量时间），直接上抛
       if (e.name === 'TimeoutError' || e.name === 'AbortError') {
         log('llm', `${what} timeout`, { host, ms: Date.now() - t0, attempt });
         throw new Error(`${what} timeout：${(TIMEOUTS[what] || 90000) / 1000}s 无响应`);
@@ -372,7 +325,7 @@ function parseJsonLoose(text) {
 
 async function chatJson(provider, messages, opts = {}) {
   // response_format 并非所有 OpenAI-compatible 服务都支持，失败时退回普通模式。
-  // 但超时/429 是基础设施错误而非格式不支持 —— 回退只会对同一挂起/拥挤服务商白等双倍时间，直接上抛让灾备链切换。
+  // 但超时/429 是基础设施错误而非格式不支持 —— 回退只会对同一挂起/拥挤服务商白等双倍时间，直接上抛。
   let text;
   try {
     text = await chat(provider, messages, { ...opts, json: true });
@@ -384,8 +337,8 @@ async function chatJson(provider, messages, opts = {}) {
 }
 
 function embeddingsConfigured(providers) {
-  const list = Array.isArray(providers) ? providers : [providers];
-  return list.some((p) => p?.type === 'local' || (usable(p) && p.apiKey && !(p.baseUrl || '').includes('openrouter.ai')));
+  const p = activeProvider(providers);
+  return Boolean(p && (p.type === 'local' || (usable(p) && p.apiKey && !(p.baseUrl || '').includes('openrouter.ai'))));
 }
 
 async function embed(provider, texts) {
@@ -404,18 +357,6 @@ async function embed(provider, texts) {
   return data.data
     .sort((a, b) => a.index - b.index)
     .map((d) => d.embedding);
-}
-
-async function transcribe(provider, filePath) {
-  const form = new FormData();
-  const buf = fs.readFileSync(filePath);
-  form.append('file', new Blob([buf]), path.basename(filePath));
-  form.append('model', provider.model);
-  const res = await throttled(provider, () =>
-    fetchWithRetry(apiUrl(provider, '/audio/transcriptions'), { method: 'POST', headers: headers(provider), body: form }, 'transcription')
-  );
-  const data = await res.json();
-  return data.text || '';
 }
 
 async function listModels(provider) {
@@ -479,28 +420,23 @@ async function testProvider(type, provider) {
   return { ok: true, ms: Date.now() - t0 };
 }
 
-// 数组灾备版入口
-const chatF = (providers, messages, opts) => withFailover(providers, (p) => chat(p, messages, opts));
-const chatCompletionF = (providers, messages, opts) => withFailover(providers, (p) => chatCompletion(p, messages, opts));
-const chatJsonF = (providers, messages, opts) => withFailover(providers, (p) => chatJson(p, messages, opts));
+// 数组入口：取第一个启用的 provider 执行
+const chatF = (providers, messages, opts) => withProvider(providers, (p) => chat(p, messages, opts));
+const chatCompletionF = (providers, messages, opts) => withProvider(providers, (p) => chatCompletion(p, messages, opts));
+const chatJsonF = (providers, messages, opts) => withProvider(providers, (p) => chatJson(p, messages, opts));
 const embedF = (providers, texts) =>
-  withFailover(
-    (Array.isArray(providers) ? providers : [providers]).filter(
-      (p) => p.type === 'local' || (p.apiKey && !(p.baseUrl || '').includes('openrouter.ai'))
-    ),
-    (p) => {
-      if (p.type === 'local') {
-        const localModels = require('./localModels'); // 懒加载：本机 BGE，离线免费
-        return localModels.embed(texts, p.model);
-      }
-      return embed(p, texts);
+  withProvider(providers, (p) => {
+    if (p.type === 'local') {
+      const localModels = require('./localModels'); // 懒加载：本机 BGE，离线免费
+      return localModels.embed(texts, p.model);
     }
-  );
-const transcribeF = (providers, filePath) => withFailover(providers, (p) => transcribe(p, filePath));
+    if (!p.apiKey || (p.baseUrl || '').includes('openrouter.ai')) throw new Error('当前 embedding provider 未配置可用的 Key');
+    return embed(p, texts);
+  });
 
 module.exports = {
-  chat, chatCompletion, chatJson, embed, transcribe, listModels,
-  chatF, chatCompletionF, chatJsonF, embedF, transcribeF,
-  usable, routeAllowed, withFailover, routeCandidates, errorForRouter, embeddingsConfigured, parseJsonLoose, localOnlyFilter, testProvider,
+  chat, chatCompletion, chatJson, embed, listModels,
+  chatF, chatCompletionF, chatJsonF, embedF,
+  usable, embeddingsConfigured, parseJsonLoose, localOnlyFilter, testProvider,
   TIMEOUTS, adapters, aggregateSseChatCompletion, // 导出供测试覆盖
 };

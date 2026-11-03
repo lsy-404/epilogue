@@ -19,7 +19,6 @@
     "@model-auth/vue": "https://github.com/lsy-404/platform-kit/releases/download/model-auth-vue-v0.14.0/model-auth-vue-0.14.0.tgz",
     "adm-zip": "^0.6.1",
     "ai": "^7.0.153",
-    "ffmpeg-static": "^5.2.0",
     "officeparser": "^8.2.0",
     "pdfjs-dist": "6.4.299"
   },
@@ -35,7 +34,6 @@
       "sharp": "0.35.4"
     },
     "onlyBuiltDependencies": [
-      "ffmpeg-static",
       "onnxruntime-node",
       "electron"
     ]

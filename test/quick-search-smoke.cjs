@@ -47,12 +47,11 @@ app.whenReady().then(async () => {
   const { createQuickSearch, DEFAULT_ACCELERATOR } = require('../src/main/quickSearch');
   let mainOpened = 0;
   let mainWindow = null;
-  const controller = createQuickSearch({ openWindow: () => { mainOpened++; }, getMainWindow: () => mainWindow });
+  const controller = createQuickSearch({ openWindow: () => { mainOpened++; } });
   assert.equal(controller.show(), false);
   assert.equal(mainOpened, 1);
   assert.equal(BrowserWindow.getAllWindows().length, 0);
   settings.set({ tosAccepted: true });
-  ipc.resumeStore();
   for (let index = 0; index < 15; index++) {
     const name = `Report ${String(index).padStart(2, '0')}.txt`;
     const filePath = path.join(fixture, name);
@@ -60,7 +59,6 @@ app.whenReady().then(async () => {
     ipc.getStore().upsert({ filePath, fileName: name, kind: 'text', summary: 'Research document', indexedAt: new Date().toISOString() });
   }
   ipc.getStore().flush();
-  ipc.unloadStore();
   const registered = controller.start();
   assert.equal(globalShortcut.isRegistered(DEFAULT_ACCELERATOR), registered);
   const alternate = 'CommandOrControl+Alt+Space';

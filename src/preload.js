@@ -29,7 +29,6 @@ contextBridge.exposeInMainWorld('epologue', {
   },
   scanStale: (dirs, days) => ipcRenderer.invoke('stale:scan', dirs, days),
   scanCleanup: () => ipcRenderer.invoke('cleanup:scan'),
-  powerStatus: () => ipcRenderer.invoke('power:status'),
   onAutoScan: (cb) => {
     const listener = (_e, found) => cb(found);
     ipcRenderer.on('stale:auto', listener);
