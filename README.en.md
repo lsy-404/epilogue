@@ -31,7 +31,7 @@ Understands archives, Office documents, PDFs and plain text; other files (images
 
 Choose a protocol for each custom Chat provider in Settings. Its base URL should point to the matching API root (usually ending in `/v1`). One protocol boundary now handles model discovery, native tool calls, usage parsing, and error isolation. Provider body overrides cannot replace managed message, tool, or model fields.
 
-The UI uses WinUI design tokens from [Furry-Xiyi/WinUIonWeb](https://github.com/Furry-Xiyi/WinUIonWeb), with an Electron product layer for GPU-composited Acrylic surfaces, responsive layout, unified flyout menus, agent-stage feedback, and write-approval cards. See `src/renderer/vendor/winui/NOTICE.md` for attribution.
+The UI uses the Fluent design tokens of `@platform-kit/fluent` (Apache-2.0) from [lsy-404/platform-kit](https://github.com/lsy-404/platform-kit), with an Electron product layer for GPU-composited Acrylic surfaces, responsive layout, unified flyout menus, agent-stage feedback, and write-approval cards.
 
 Add opens the models.dev / OpenCode Provider Source catalog for click-to-connect setup, alongside official Claude and ChatGPT Codex browser OAuth. OAuth uses PKCE and keeps access/refresh tokens in Electron `safeStorage`, outside settings JSON and the renderer. Custom Compatible endpoints still support API-key rotation, request overlays, and manual JSON field mapping.
 

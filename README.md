@@ -31,7 +31,7 @@
 
 自定义 Chat Provider 可在设置中选择协议。Base URL 应指向对应 API 根路径（通常以 `/v1` 结尾）；模型列表发现、原生工具调用、用量解析与错误隔离均由协议适配层统一处理。Provider 自定义请求体不能覆盖消息、工具、模型等受控字段。
 
-界面使用来自 [Furry-Xiyi/WinUIonWeb](https://github.com/Furry-Xiyi/WinUIonWeb) 的 WinUI 设计令牌，并在 Electron 产品层加入 GPU 合成的 Acrylic、响应式布局、统一 flyout 弹出菜单、Agent 阶段指示与写操作审批卡片。第三方归属见 `src/renderer/vendor/winui/NOTICE.md`。
+界面使用 [lsy-404/platform-kit](https://github.com/lsy-404/platform-kit) 的 `@platform-kit/fluent`（Apache-2.0）Fluent 设计令牌，并在 Electron 产品层加入 GPU 合成的 Acrylic、响应式布局、统一 flyout 弹出菜单、Agent 阶段指示与写操作审批卡片。
 
 Provider Source 会自动带入上游地址、协议、模型目录和 API Key 环境变量提示；OAuth 使用系统浏览器 PKCE 授权，access/refresh token 只存入 Electron `safeStorage` 加密仓库，不进入设置 JSON 或渲染进程。自定义 Compatible 接入器仍支持 API Key 组轮换、自定义鉴权 Header、请求/模型路径、Headers、请求体覆盖与手动响应字段映射。
 

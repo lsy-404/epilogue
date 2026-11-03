@@ -28,6 +28,9 @@ importers:
       '@model-auth/vue':
         specifier: https://github.com/lsy-404/platform-kit/releases/download/model-auth-vue-v0.14.0/model-auth-vue-0.14.0.tgz
         version: https://github.com/lsy-404/platform-kit/releases/download/model-auth-vue-v0.14.0/model-auth-vue-0.14.0.tgz(vue@3.5.42)
+      '@platform-kit/fluent':
+        specifier: https://github.com/lsy-404/platform-kit/releases/download/fluent-v0.2.11/platform-kit-fluent-0.2.11.tgz
+        version: https://github.com/lsy-404/platform-kit/releases/download/fluent-v0.2.11/platform-kit-fluent-0.2.11.tgz(vue@3.5.42)
       adm-zip:
         specifier: ^0.6.1
         version: 0.6.1
@@ -404,6 +407,12 @@ packages:
   '@napi-rs/canvas@1.0.13':
     resolution: {integrity: sha512-b87ugZpQ5ViwqVBkjervxpwa0GmJPsKHLBNoZN6GpjWeHzTbDUGryriq+2DYW2XbB+xCqSIINQysC0/I87nPbw==}
     engines: {node: '>= 10'}
+
+  '@platform-kit/fluent@https://github.com/lsy-404/platform-kit/releases/download/fluent-v0.2.11/platform-kit-fluent-0.2.11.tgz':
+    resolution: {integrity: sha512-Ic/kqxQXTLmnEapPRiiu4RmTjWpdN2iF0oUgz7QhlJOIr+eKphbnVVE1Ups5Ypg1dRl/FglfRnf/eLudX3HUEQ==, tarball: https://github.com/lsy-404/platform-kit/releases/download/fluent-v0.2.11/platform-kit-fluent-0.2.11.tgz}
+    version: 0.2.11
+    peerDependencies:
+      vue: ^3.5.0
 
   '@protobufjs/aspromise@1.1.2':
     resolution: {integrity: sha512-j+gKExEuLmKwvz3OgROXtrJ2UG2x8Ch2YZUxahh+s1F2HZ+wAceUNLkvy6zKCPVRkU++ZWQrdxsUeQXmcg4uoQ==}
@@ -1298,6 +1307,10 @@ snapshots:
       '@napi-rs/canvas-win32-arm64-msvc': 1.0.13
       '@napi-rs/canvas-win32-x64-msvc': 1.0.13
     optional: true
+
+  '@platform-kit/fluent@https://github.com/lsy-404/platform-kit/releases/download/fluent-v0.2.11/platform-kit-fluent-0.2.11.tgz(vue@3.5.42)':
+    dependencies:
+      vue: 3.5.42
 
   '@protobufjs/aspromise@1.1.2': {}
 
