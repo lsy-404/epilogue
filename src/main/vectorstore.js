@@ -9,6 +9,7 @@ const fs = require('fs');
 const crypto = require('crypto');
 const path = require('path');
 const zlib = require('zlib');
+const hooks = require('./hooks');
 
 const VEC_PREFIX = 'f32:';
 const BIN_MAGIC = Buffer.from('EVB1');
@@ -289,6 +290,7 @@ class VectorStore {
     this.records.splice(index, 1);
     this._rebuildPathIndex();
     this.save();
+    hooks.emit('index:removed', { id: record.id, filePath: record.filePath });
   }
 
   // 文件被归类移动后更新路径
@@ -301,6 +303,7 @@ class VectorStore {
       this.pathIndex.delete(oldPath);
       this.pathIndex.set(newPath, index);
       this.save();
+      hooks.emit('index:moved', { id: r.id, filePath: newPath, previousPath: oldPath });
     }
   }
 
@@ -340,6 +343,7 @@ class VectorStore {
     this.records = this.records.filter((r) => (r.kind || 'other') !== kind);
     this._rebuildPathIndex();
     this.save();
+    for (const r of gone) hooks.emit('index:removed', { id: r.id, filePath: r.filePath });
     return before - this.records.length;
   }
 

@@ -10,6 +10,9 @@ let timer = null;
 let openWindow = () => {};
 let getWindow = () => null;
 let lastFound = [];
+let jobTimer = null;
+const JOB_RERUN_MS = 60 * 1000;
+const JOB_KICK_MS = 30 * 1000;
 
 function intervalMs() {
   const hours = Math.max(0.25, settings.get().cleanup.scanIntervalHours || 6);
@@ -97,6 +100,19 @@ function tick(auto = false) {
   return found;
 }
 
+// 扩展登记的后台作业：随扫描节奏运行，返回 { more: true } 时一分钟后再跑一轮
+function runJobsLater(ms) {
+  clearTimeout(jobTimer);
+  jobTimer = setTimeout(runJobs, ms);
+  jobTimer.unref?.();
+}
+
+async function runJobs() {
+  const { more, errors } = await hooks.runJobs();
+  for (const error of errors) require('./log').log('jobs', 'job failed', { error: String(error?.message || error).slice(0, 200) });
+  if (more) runJobsLater(JOB_RERUN_MS);
+}
+
 function arm() {
   clearTimeout(timer);
   timer = setTimeout(() => {
@@ -105,6 +121,7 @@ function arm() {
     } catch {
       /* 扫描失败不致命，下轮再试 */
     }
+    runJobs();
     arm();
   }, intervalMs());
 }
@@ -120,4 +137,4 @@ function restart() {
   arm();
 }
 
-module.exports = { start, restart, rearm: arm, tick, getLastFound: () => lastFound };
+module.exports = { start, restart, rearm: arm, tick, runJobs, kickJobs: () => runJobsLater(JOB_KICK_MS), getLastFound: () => lastFound };

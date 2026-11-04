@@ -4,7 +4,7 @@ const { ipcMain, dialog, shell, app, clipboard } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const settings = require('./settings');
-const hooks = require('./hooks');
+const extensionHooks = require('./hooks');
 const { toProError } = require('./proVerify');
 const { isTrustedIpcEvent } = require('./runtimeSecurity');
 
@@ -50,6 +50,7 @@ function dropStore() {
 
 // 寻物三模式：keyword 纯关键字 / match embedding 匹配度（只出命中与分数）/ ai 检索 + LLM 总结
 function ask(question, mode = 'ai') {
+  if (extensionHooks.modeNames().includes(mode)) return extensionHooks.runMode(mode, question);
   return withStore((s) => search(s, question, mode));
 }
 
@@ -72,7 +73,7 @@ async function search(s, question, mode) {
   }
   // 扩展向量空间（如图像）：各空间用自己的查询向量检索，与文本命中合并去重
   if (wantVector) {
-    for (const space of hooks.vectorSpaces()) {
+    for (const space of extensionHooks.vectorSpaces()) {
       try {
         const queryVector = await space.embedQuery(question);
         if (!queryVector) continue;
@@ -253,6 +254,7 @@ function register(getWindow, hooks = {}) {
   handleStore('store:remove', (s, _e, filePath) => s.remove(filePath));
 
   handle('search:ask', (_e, question, mode) => ask(question, mode));
+  handle('search:modes', () => extensionHooks.modeNames());
 
   // 手动触发归类目标额外索引（跑完为止，不设上限；定时 pass 仍限 50/轮）
   handleStore('dest:index', (s) =>

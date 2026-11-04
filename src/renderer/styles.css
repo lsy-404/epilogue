@@ -301,6 +301,9 @@ textarea { font-family: var(--font-body); resize: vertical; line-height: 1.7; }
 .folder-list li:last-child, .file-list li:last-child { border-bottom: none; }
 
 .item-main { flex: 1; min-width: 0; }
+.item-passages { margin-top: 0.3rem; }
+.item-passage { margin: 0.2rem 0 0; color: var(--text-dim); font-size: 0.78rem; line-height: 1.45; overflow-wrap: anywhere; }
+.item-passage mark { background: color-mix(in srgb, var(--gold, #c9a227) 35%, transparent); color: var(--text-primary); border-radius: 2px; }
 .item-title { color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .item-sub {
   color: var(--text-dim);

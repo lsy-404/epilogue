@@ -18,6 +18,7 @@ contextBridge.exposeInMainWorld('epologue', {
   assistantResolveApproval: (id, approved) => ipcRenderer.invoke('assistant:approval', id, approved),
   storeRemove: (p) => ipcRenderer.invoke('store:remove', p),
   ask: (question, mode) => ipcRenderer.invoke('search:ask', question, mode),
+  searchModes: () => ipcRenderer.invoke('search:modes'),
   modelStatus: (model) => ipcRenderer.invoke('model:status', model),
   reportNetwork: (metered) => ipcRenderer.invoke('network:report', metered),
   modelDownload: (task, model) => ipcRenderer.invoke('model:download', task, model),

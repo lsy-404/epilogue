@@ -4,6 +4,7 @@
 
 const settings = require('./settings');
 const proto = require('../shared/assistantProtocol');
+const hooks = require('./hooks');
 
 function settingsDigest(cfg) {
   return {
@@ -75,6 +76,12 @@ async function executeReadTool(tool, args, events) {
     const ipc = require('./ipc');
     events.push({ type: 'status_read', detail: '' });
     return ipc.withStore((store) => ({ tool, ok: true, stats: store.stats(), settings: settingsDigest(settings.get()) }));
+  }
+  const extension = hooks.getTool(tool);
+  if (extension) {
+    const result = await extension.execute(args && typeof args === 'object' ? args : {});
+    events.push({ type: 'tool', detail: tool });
+    return { tool, ok: true, result };
   }
   return { tool, ok: false, error: 'unknown or mutating tool' };
 }

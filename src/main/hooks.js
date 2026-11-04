@@ -9,7 +9,11 @@ let extractors = new Map(); // kind -> fn
 let spaces = new Map(); // id -> { id, kinds, embedFile, embedQuery }
 let strategy = null;
 let intervalFilter = null;
-let running = new Set(); // AbortController of in-flight extractor calls
+let running = new Set(); // AbortController of in-flight extractor, mode and job calls
+let modes = new Map(); // name -> fn
+let tools = new Map(); // name -> { definition, execute }
+let jobs = [];
+let jobsBusy = false;
 
 function emit(event, payload) {
   emitSink?.(event, payload);
@@ -25,6 +29,10 @@ function reset() {
   spaces = new Map();
   strategy = null;
   intervalFilter = null;
+  modes = new Map();
+  tools = new Map();
+  jobs = [];
+  jobsBusy = false;
   for (const controller of running) controller.abort();
   running = new Set();
 }
@@ -89,7 +97,88 @@ function setIntervalFilter(fn) {
   intervalFilter = fn;
 }
 
+const MODE_NAMES = new Set(['deep']);
+const TOOL_NAME = /^[a-z][a-z0-9_]{0,47}$/;
+const BUILTIN_TOOLS = new Set(['update_settings', 'search_files', 'get_status']);
+
+function registerMode(name, fn) {
+  if (typeof name !== 'string' || !MODE_NAMES.has(name)) throw new Error('unsupported search mode');
+  if (typeof fn !== 'function') throw new Error('search mode must be a function');
+  if (modes.has(name)) throw new Error(`search mode '${name}' is already registered`);
+  modes.set(name, fn);
+}
+
+// Runs the registered mode with an abort signal; returns null when the mode is not registered.
+async function runMode(name, question) {
+  const fn = modes.get(name);
+  if (!fn) return null;
+  const controller = new AbortController();
+  running.add(controller);
+  try {
+    const out = await fn(question, { signal: controller.signal });
+    if (!Array.isArray(out?.hits)) throw new Error('a search mode must return { hits: [] }');
+    return { answer: typeof out.answer === 'string' && out.answer ? out.answer : null, hits: out.hits, mode: name };
+  } finally {
+    running.delete(controller);
+  }
+}
+
+function registerTools(list) {
+  if (!Array.isArray(list) || !list.length) throw new Error('tools must be a non-empty array');
+  const staged = new Map();
+  for (const tool of list) {
+    const { definition, execute } = tool || {};
+    const name = definition?.name;
+    if (typeof name !== 'string' || !TOOL_NAME.test(name)) throw new Error('invalid tool name');
+    if (tool.write || definition.write) throw new Error(`tool '${name}' is not read-only`);
+    if (typeof definition.description !== 'string' || !definition.description) throw new Error(`tool '${name}' needs a description`);
+    if (definition.parameters?.type !== 'object') throw new Error(`tool '${name}' needs object parameters`);
+    if (typeof execute !== 'function') throw new Error(`tool '${name}' needs an execute function`);
+    if (BUILTIN_TOOLS.has(name) || tools.has(name) || staged.has(name)) throw new Error(`tool '${name}' is already registered`);
+    const { description, parameters } = definition;
+    staged.set(name, { definition: { name, description, parameters }, execute });
+  }
+  for (const [name, tool] of staged) tools.set(name, tool);
+}
+
+function registerJob(fn) {
+  if (typeof fn !== 'function') throw new Error('job must be a function');
+  jobs.push(fn);
+}
+
+// Runs every job once and skips the pass while the previous one is still going; `more` asks the scheduler for an early re-run.
+async function runJobs() {
+  if (jobsBusy) return { more: false, errors: [] };
+  jobsBusy = true;
+  const controller = new AbortController();
+  running.add(controller);
+  const errors = [];
+  let more = false;
+  try {
+    for (const job of [...jobs]) {
+      try {
+        const out = await job({ signal: controller.signal });
+        if (out?.more === true) more = true;
+      } catch (error) {
+        errors.push(error);
+      }
+    }
+  } finally {
+    running.delete(controller);
+    jobsBusy = false;
+  }
+  return { more, errors };
+}
+
 module.exports = {
+  registerMode,
+  runMode,
+  modeNames: () => [...modes.keys()],
+  registerTools,
+  getTool: (name) => tools.get(name) || null,
+  toolDefinitions: () => [...tools.values()].map((tool) => tool.definition),
+  registerJob,
+  runJobs,
   TEXT_SPACE,
   emit,
   attach,

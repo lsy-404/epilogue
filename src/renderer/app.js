@@ -189,12 +189,40 @@ api.onAutoScan((found) => {
   $('#organizeHint').textContent = t('auto_found_n', { n: found.length });
 });
 
+// Escapes the text first and wraps highlight ranges ([start, end) offsets into `text`) in <mark>.
+function markedText(text, ranges) {
+  const source = String(text ?? '');
+  const spans = (Array.isArray(ranges) ? ranges : [])
+    .map((r) => [Math.max(0, Math.floor(Number(r?.[0]))), Math.min(source.length, Math.floor(Number(r?.[1])))])
+    .filter(([a, b]) => Number.isFinite(a) && Number.isFinite(b) && b > a)
+    .sort((x, y) => x[0] - y[0]);
+  const merged = [];
+  for (const span of spans) {
+    const last = merged.at(-1);
+    if (last && span[0] <= last[1]) last[1] = Math.max(last[1], span[1]);
+    else merged.push(span);
+  }
+  let out = '';
+  let pos = 0;
+  for (const [a, b] of merged) {
+    out += esc(source.slice(pos, a)) + `<mark>${esc(source.slice(a, b))}</mark>`;
+    pos = b;
+  }
+  return out + esc(source.slice(pos));
+}
+
+function passageList(passages) {
+  if (!Array.isArray(passages) || !passages.length) return '';
+  return `<div class="item-passages">${passages.slice(0, 3).map((p) => `<p class="item-passage">${markedText(p?.text, p?.highlights)}</p>`).join('')}</div>`;
+}
+
 function fileItem(r, extra = '') {
   return `<li data-file-path="${esc(r.filePath)}">
     <span class="badge">${esc(r.kind || '?')}</span>
     <div class="item-main">
       <div class="item-title">${esc(r.fileName)}</div>
       <div class="item-sub">${esc(r.summary || r.filePath)}</div>
+      ${passageList(r.passages)}
     </div>
     ${extra}
     <button class="link-btn" data-reveal="${esc(r.filePath)}">${t('locate')}</button>
@@ -362,9 +390,29 @@ $('#btnIndexFiles').addEventListener('click', async () => {
   if (files.length) runIndex(() => api.indexFiles(files));
 });
 
-/* ---------- 寻物：三模式（关键字 / 匹配度 / AI 搜索） ---------- */
+/* ---------- 寻物：三模式（关键字 / 匹配度 / AI 搜索），扩展注册后追加「深度」 ---------- */
+let searchModes = [];
+
+function effectiveSearchMode() {
+  const mode = currentSettings.searchMode || 'ai';
+  return mode === 'deep' && !searchModes.includes('deep') ? 'ai' : mode;
+}
+
 function renderSearchSeg() {
-  document.querySelectorAll('#searchModeSeg button').forEach((b) => b.classList.toggle('active', b.dataset.mode === (currentSettings.searchMode || 'ai')));
+  const seg = $('#searchModeSeg');
+  let deep = seg.querySelector('[data-mode="deep"]');
+  if (searchModes.includes('deep')) {
+    if (!deep) {
+      deep = document.createElement('button');
+      deep.dataset.mode = 'deep';
+      seg.append(deep);
+    }
+    deep.textContent = t('search_deep');
+  } else {
+    deep?.remove();
+  }
+  const current = effectiveSearchMode();
+  seg.querySelectorAll('button').forEach((b) => b.classList.toggle('active', b.dataset.mode === current));
 }
 $('#searchModeSeg').addEventListener('click', async (e) => {
   const btn = e.target.closest('[data-mode]');
@@ -380,8 +428,8 @@ $('#askForm').addEventListener('submit', async (e) => {
   $('#askStatus').classList.remove('hidden');
   $('#answerPanel').classList.add('hidden');
   try {
-    const r = await api.ask(q, currentSettings.searchMode || 'ai');
-    $('#searchMode').textContent = r.mode === 'vector' ? t('mode_vector') : t('mode_keyword');
+    const r = await api.ask(q, effectiveSearchMode());
+    $('#searchMode').textContent = r.mode === 'deep' ? t('search_deep') : r.mode === 'vector' ? t('mode_vector') : t('mode_keyword');
     if (!r.hits.length) {
       $('#answerText').textContent = t('no_results');
       $('#answerText').classList.remove('hidden');
@@ -411,6 +459,7 @@ function eventBadge(ev) {
     settings_updated: 'ev_settings',
     search: 'ev_search',
     status_read: 'ev_status',
+    tool: 'ev_tool',
     model_used: 'ev_model',
     approval_requested: 'ev_approval',
     approval_accepted: 'ev_approved',
@@ -1585,6 +1634,8 @@ async function refreshPro() {
   proStatus = await api.pro.status();
   renderProView();
   loadProRenderer();
+  searchModes = proStatus.active ? await api.searchModes() : [];
+  renderSearchSeg();
 }
 
 async function proAction(call, successKey) {

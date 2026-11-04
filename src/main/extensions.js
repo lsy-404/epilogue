@@ -11,6 +11,8 @@ const PRO_SCHEME = 'epilogue-pro';
 const IPC_NAME = /^[a-z][a-z0-9:-]{0,63}$/;
 const MAX_PACKAGE_BYTES = 64 * 1024 * 1024;
 const MAX_LICENSE_BYTES = 4096;
+const MAX_EMBED_TEXTS = 256;
+const CHAT_ROLES = new Set(['system', 'user', 'assistant']);
 
 function createEventBus(onError) {
   const listeners = new Map();
@@ -297,6 +299,16 @@ function createExtensionManager({
       throw new Error('This core hook is not available');
     };
     const modelHost = core.modelHost ?? {};
+    const listen = (event) => (cb) => {
+      if (typeof cb !== 'function') throw new Error('callback must be a function');
+      const wrapped = (payload) => {
+        Promise.resolve()
+          .then(() => cb(payload))
+          .catch((error) => log('pro', 'event listener failed', { event, message: String(error?.message || error) }));
+      };
+      bus.on(event, wrapped);
+      return () => bus.off(event, wrapped);
+    };
     return Object.freeze({
       PRO_API,
       version: coreVersion,
@@ -335,7 +347,41 @@ function createExtensionManager({
       scheduler: Object.freeze({
         setIntervalFilter: hooks.setIntervalFilter,
         rearm: () => core.scheduler?.rearm(),
+        onTick(job) {
+          hooks.registerJob(job);
+          core.scheduler?.kickJobs?.();
+        },
       }),
+      index: Object.freeze({
+        onIndexed: listen('index:indexed'),
+        onRemoved: listen('index:removed'),
+        onMoved: listen('index:moved'),
+        records: () => (core.index?.records ?? unavailable)(),
+      }),
+      extract(filePath) {
+        if (typeof filePath !== 'string' || !path.isAbsolute(filePath)) throw new Error('filePath must be an absolute path');
+        return (core.extract ?? unavailable)(filePath);
+      },
+      embedLocal(texts) {
+        if (!Array.isArray(texts) || texts.length > MAX_EMBED_TEXTS || !texts.every((text) => typeof text === 'string')) {
+          throw new Error(`texts must be an array of at most ${MAX_EMBED_TEXTS} strings`);
+        }
+        return (core.embedLocal ?? unavailable)(texts);
+      },
+      search: Object.freeze({ registerMode: hooks.registerMode }),
+      assistant: Object.freeze({ registerTools: hooks.registerTools }),
+      chat(messages, opts = {}) {
+        if (!Array.isArray(messages) || !messages.length || !messages.every((m) => CHAT_ROLES.has(m?.role) && typeof m.content === 'string')) {
+          throw new Error('messages must be a non-empty array of { role, content } with string content');
+        }
+        const { temperature, maxTokens, signal, json } = opts ?? {};
+        return (core.chat ?? unavailable)(settings.get().providers.chat, messages, {
+          ...(Number.isFinite(temperature) ? { temperature } : {}),
+          ...(Number.isInteger(maxTokens) && maxTokens > 0 ? { maxTokens } : {}),
+          ...(signal instanceof AbortSignal ? { signal } : {}),
+          ...(json === true ? { json } : {}),
+        });
+      },
       power: Object.freeze({ onBattery: () => core.power?.onBattery() ?? false }),
     });
   }
@@ -428,11 +474,20 @@ function createExtensionManager({
 }
 
 // Maps the runtime modules onto the hook surface the extension manager exposes; tests pass fakes instead.
-function createCore({ localModels, ipc, scheduler, onBattery }) {
+function createCore({ localModels, ipc, scheduler, onBattery, llm, settings }) {
   return {
+    index: { records: () => ipc.withStore((store) => structuredClone(store.all())) },
+    extract: async (filePath) => ({ content: (await localModels.extractRemote(filePath, settings.get().extraction)).content }),
+    async embedLocal(texts) {
+      const provider = settings.get().providers.embeddings.find((p) => p.type === 'local' && p.enabled !== false);
+      if (!provider || !localModels.status(provider.model).downloaded) return null;
+      const vectors = await localModels.embed(texts, provider.model);
+      return { model: provider.model, dim: vectors[0]?.length ?? 0, vectors };
+    },
+    chat: (...args) => llm.chatF(...args),
     modelHost: { setModule: localModels.setHostModule, call: localModels.hostCall, pid: localModels.hostPid },
     lifecycle: { stopHost: localModels.stopHostIfIdle, dropStore: ipc.dropStore },
-    scheduler: { rearm: scheduler.rearm },
+    scheduler: { rearm: scheduler.rearm, kickJobs: scheduler.kickJobs },
     power: { onBattery },
   };
 }
@@ -457,6 +512,8 @@ function getManager() {
     ipcRemove: (channel) => ipcMain.removeHandler(channel),
     core: createCore({
       localModels: require('./localModels'),
+      llm: require('./llm'),
+      settings,
       ipc,
       scheduler: require('./scheduler'),
       onBattery: () => powerMonitor.isOnBatteryPower(),

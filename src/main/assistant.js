@@ -12,6 +12,7 @@ const llm = require('./llm');
 const { makeT } = require('../shared/locales');
 const proto = require('../shared/assistantProtocol');
 const tools = require('./assistantTools');
+const extensionHooks = require('./hooks');
 
 const MAX_HISTORY = 16;
 const MAX_TOOL_ROUNDS = 4;
@@ -23,8 +24,19 @@ function pruneApprovals() {
   for (const [id, item] of pendingApprovals) if (item.createdAt < cutoff) pendingApprovals.delete(id);
 }
 
+const activeToolNames = () => [...proto.TOOL_NAMES, ...extensionHooks.toolDefinitions().map((tool) => tool.name)];
+
+function extensionToolLines(extra) {
+  if (!extra.length) return [];
+  return [
+    `${extra.map((tool) => tool.name).join('、')} 同样是只读工具，可以直接使用：`,
+    ...extra.map((tool) => `- ${tool.name}: ${tool.description} 参数: ${JSON.stringify(tool.parameters)}`),
+  ];
+}
+
 function buildSystemPrompt(cfg) {
   const lang = cfg.language === 'en' ? 'English' : '中文';
+  const extra = extensionHooks.toolDefinitions();
   return [
     '你是 Epilogue 的内置文件工作流 agent。Epilogue 在本机索引文件内容、查找文件，并按用户明确的习惯协助整理。',
     `界面语言：${lang}。默认用该语言回复；用户切换语言时跟随用户。`,
@@ -32,12 +44,13 @@ function buildSystemPrompt(cfg) {
     '',
     '工作方式：先理解目标，再选择最少的工具；读取后核对结果；说明已知事实与不确定性。',
     'search_files 与 get_status 是只读工具，可以直接使用。update_settings 只提交变更建议，应用会要求用户明确确认后才执行。',
+    ...extensionToolLines(extra),
     '不要声称尚待确认的变更已经生效。不要尝试修改 provider、API Key、文件路径或白名单外设置。',
     '用户说“记住/以后……”时，可在保留仍有效旧条目的前提下，提议把简短规则合并进 rules。',
     '',
     '若当前模型不支持原生工具调用，严格输出一个 JSON 对象作为兼容协议，不要添加代码围栏：',
     '{"reply":"给用户看的话","actions":[{"tool":"工具名","args":{}}]}',
-    '无需工具时 actions=[]。可用工具仅为 update_settings、search_files、get_status。',
+    `无需工具时 actions=[]。可用工具仅为 ${activeToolNames().join('、')}。`,
   ].join('\n');
 }
 
@@ -81,7 +94,7 @@ function stageApproval(action) {
 
 function fallbackActions(completion) {
   if (!completion.text) return { reply: '', actions: [] };
-  const parsed = proto.parseAssistantOutput(completion.text, llm.parseJsonLoose);
+  const parsed = proto.parseAssistantOutput(completion.text, llm.parseJsonLoose, activeToolNames());
   return parsed || { reply: completion.text.trim(), actions: [] };
 }
 
@@ -89,7 +102,7 @@ async function requestCompletion(providers, messages) {
   try {
     return await llm.chatCompletionF(providers, messages, {
       temperature: 0.3,
-      tools: proto.TOOL_DEFINITIONS,
+      tools: [...proto.TOOL_DEFINITIONS, ...extensionHooks.toolDefinitions()],
     });
   } catch (nativeError) {
     const message = String(nativeError.message || nativeError);
@@ -127,7 +140,7 @@ async function chatTurn(history, hooks = {}) {
       providerSeen = true;
     }
 
-    const nativeActions = proto.normalizeNativeToolCalls(completion.toolCalls);
+    const nativeActions = proto.normalizeNativeToolCalls(completion.toolCalls, activeToolNames());
     const fallback = nativeActions.length ? { reply: completion.text.trim(), actions: [] } : fallbackActions(completion);
     const actions = nativeActions.length
       ? nativeActions

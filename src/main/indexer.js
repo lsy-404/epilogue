@@ -116,6 +116,7 @@ async function indexFile(filePath, store, onProgress = () => {}, { nameOnly = fa
     indexedMode: nameOnly ? 'name' : 'full', // name = 仅文件名（云占位等），将来允许读内容时可升级重索
     indexedAt: new Date().toISOString(),
   });
+  hooks.emit('index:indexed', { record: structuredClone(record), content });
   onProgress({ file: fileName, stage: '完成' });
   log('index', `indexed: ${fileName}`, { kind, sizeBytes: stat.size, hasVector: Boolean(vector), ms: Date.now() - t0 });
   return record;

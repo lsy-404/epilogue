@@ -101,7 +101,7 @@ function sanitizeSettingsPatch(raw, schema = SETTINGS_SCHEMA, prefix = '') {
 }
 
 // 从模型输出提取 {reply, actions}；不是协议 JSON 时返回 null（按纯文本回复处理）
-function parseAssistantOutput(text, parseJsonLoose) {
+function parseAssistantOutput(text, parseJsonLoose, toolNames = TOOL_NAMES) {
   let obj;
   try {
     obj = parseJsonLoose(text);
@@ -110,15 +110,15 @@ function parseAssistantOutput(text, parseJsonLoose) {
   }
   if (!obj || typeof obj !== 'object' || typeof obj.reply !== 'string') return null;
   const actions = (Array.isArray(obj.actions) ? obj.actions : [])
-    .filter((a) => a && typeof a === 'object' && TOOL_NAMES.includes(a.tool))
+    .filter((a) => a && typeof a === 'object' && toolNames.includes(a.tool))
     .slice(0, MAX_ACTIONS_PER_TURN)
     .map((a) => ({ tool: a.tool, args: a.args && typeof a.args === 'object' ? a.args : {} }));
   return { reply: obj.reply, actions };
 }
 
-function normalizeNativeToolCalls(calls) {
+function normalizeNativeToolCalls(calls, toolNames = TOOL_NAMES) {
   return (Array.isArray(calls) ? calls : [])
-    .filter((call) => call && typeof call === 'object' && TOOL_NAMES.includes(call.name))
+    .filter((call) => call && typeof call === 'object' && toolNames.includes(call.name))
     .slice(0, MAX_ACTIONS_PER_TURN)
     .map((call, index) => ({
       id: String(call.id || `call_${index + 1}`),
