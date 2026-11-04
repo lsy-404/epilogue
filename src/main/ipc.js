@@ -234,7 +234,8 @@ function register(getWindow, hooks = {}) {
         await lazy.indexer.indexFile(
           filePaths[i],
           s,
-          (p) => progress('index:progress')({ current: i + 1, total: filePaths.length, ...p })
+          (p) => progress('index:progress')({ current: i + 1, total: filePaths.length, ...p }),
+          { manual: true }
         );
         results.ok++;
       } catch (e) {
@@ -308,7 +309,8 @@ function register(getWindow, hooks = {}) {
           r = await lazy.indexer.indexFile(
             norm[i].filePath,
             s,
-            (p) => progress('index:progress')({ current: i + 1, total: norm.length, ...p })
+            (p) => progress('index:progress')({ current: i + 1, total: norm.length, ...p }),
+            { manual: true }
           );
         } catch (e) {
           require('./log').log('classify', `index failed, skipped: ${path.basename(norm[i].filePath)}`, { error: String(e.message || e).slice(0, 200) });

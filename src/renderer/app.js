@@ -1425,7 +1425,8 @@ $('#btnIndexDest').addEventListener('click', async () => {
 /* ---------- 自动保存：所有改动点击/输入即存（防抖） ---------- */
 function collectSettingsPatch() {
   return {
-    providers: currentSettings.providers,
+    // 只提交本页管理的能力，其余 provider 列表（如扩展的转写）由各自面板保存
+    providers: { chat: currentSettings.providers.chat, embeddings: currentSettings.providers.embeddings },
     rules: $('#rulesInput').value,
     destinations: currentSettings.destinations,
     destIndex: {

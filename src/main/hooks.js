@@ -46,13 +46,13 @@ function registerExtractor(kinds, fn) {
 }
 
 // Runs the extractor registered for `kind`; returns null when none is registered.
-async function runExtractor(kind, filePath, { maxChars }) {
+async function runExtractor(kind, filePath, { maxChars, manual = false }) {
   const fn = extractors.get(kind);
   if (!fn) return null;
   const controller = new AbortController();
   running.add(controller);
   try {
-    const out = await fn(filePath, { maxChars, signal: controller.signal });
+    const out = await fn(filePath, { maxChars, manual, signal: controller.signal });
     const content = typeof out?.content === 'string' ? out.content : '';
     const preview = typeof out?.preview === 'string' ? out.preview : undefined;
     return { content, preview };

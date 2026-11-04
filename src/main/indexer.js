@@ -36,7 +36,7 @@ function localMeta(content, fileName, filePath = '') {
   return { summary, keywords };
 }
 
-async function indexFile(filePath, store, onProgress = () => {}, { nameOnly = false } = {}) {
+async function indexFile(filePath, store, onProgress = () => {}, { nameOnly = false, manual = false } = {}) {
   const { log } = require('./log');
   const t0 = Date.now();
   const cfg = settings.get();
@@ -53,7 +53,7 @@ async function indexFile(filePath, store, onProgress = () => {}, { nameOnly = fa
     onProgress({ file: fileName, stage: '文件名索引…' });
   } else {
     onProgress({ file: fileName, stage: '提取内容…' });
-    const extension = await hooks.runExtractor(kind, filePath, { maxChars: cfg.extraction.maxChars });
+    const extension = await hooks.runExtractor(kind, filePath, { maxChars: cfg.extraction.maxChars, manual });
     if (extension) {
       content = extension.content.slice(0, cfg.extraction.maxChars);
       preview = extension.preview;
