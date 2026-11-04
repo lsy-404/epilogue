@@ -934,6 +934,14 @@ input[type='range'] { accent-color: var(--gold); }
 }
 .chat-bar textarea { background: var(--input-active); }
 
+/* Multi-enable provider list (Pro): drag handle column in front of the row content */
+.drag-handle { cursor: grab; color: var(--text-dim); font-size: 0.84rem; user-select: none; }
+.provider-row.dragging { opacity: 0.4; border-color: var(--gold); }
+.provider-list.multi .provider-row { grid-template-columns: auto 1.1fr 1.6fr 1.3fr 1.3fr auto auto auto; }
+.provider-list.multi .provider-row:has(.provider-protocol) {
+  grid-template-columns: auto minmax(92px, 1fr) minmax(130px, 1.1fr) minmax(150px, 1.5fr) minmax(120px, 1.15fr) minmax(110px, 1.1fr) auto auto auto auto;
+}
+
 /* Protocol-aware provider editor */
 .provider-row {
   border-color: var(--divider);
@@ -1160,6 +1168,9 @@ input[type='range'] { accent-color: var(--gold); }
   .main { padding-inline: 1.2rem; }
   .provider-row,
   .provider-row:has(.provider-protocol) { grid-template-columns: 1fr 1fr; }
+  .provider-list.multi .provider-row,
+  .provider-list.multi .provider-row:has(.provider-protocol) { grid-template-columns: auto 1fr 1fr; }
+  .provider-list.multi .provider-row .drag-handle { grid-row: 1 / span 2; }
   .provider-row > * { min-width: 0; }
   .agent-runtime-banner { align-items: flex-start; flex-direction: column; }
 }

@@ -2,6 +2,7 @@
 // 多协议模型客户端：chat 走 provider adapter；Compatible 自动模式复用 IRIS 同款 AI SDK；
 // embeddings 维持 OpenAI-compatible 的直接请求。
 const adapters = require('./providerAdapters');
+const hooks = require('./hooks');
 const compatibleKeyCursors = new Map();
 let compatibleSdkPromise = null;
 
@@ -37,17 +38,24 @@ function localOnlyFilter(providers, localOnly) {
   return localOnly ? list.filter((p) => p.type === 'local') : list;
 }
 
-// 每类能力只用一个 provider：数组中第一个启用且路由允许的条目
-function activeProvider(providers) {
+// 启用且路由允许的条目（保持用户排序）；默认只用第一个
+function eligibleProviders(providers) {
   const list = Array.isArray(providers) ? providers : [providers];
-  return list.find((provider) => provider && provider.enabled !== false && routeAllowed(provider)) || null;
+  return list.filter((provider) => provider && provider.enabled !== false && routeAllowed(provider));
 }
 
-async function withProvider(providers, fn) {
-  const provider = activeProvider(providers);
-  if (!usable(provider)) throw new Error('没有可用的 provider（请在「设置 → 能力」选择 Provider Source、连接 OAuth 或配置自定义接口）');
+function activeProvider(providers) {
+  return eligibleProviders(providers)[0] || null;
+}
+
+const NO_PROVIDER = '没有可用的 provider（请在「设置 → 能力」选择 Provider Source、连接 OAuth 或配置自定义接口）';
+
+// 默认策略：第一个可用 provider 执行一次；扩展可经 hooks.setStrategy 替换（如有序灾备）
+async function defaultStrategy(capability, providers, attempt) {
+  const provider = providers[0];
+  if (!usable(provider)) throw new Error(NO_PROVIDER);
   try {
-    return await fn(provider);
+    return await attempt(provider);
   } catch (e) {
     require('./log').log('llm', `provider failed: ${provider.name || provider.baseUrl || 'local'}`, { error: String(e.message || e).slice(0, 200) });
     // 限流/超时：换成可操作的友好提示
@@ -59,6 +67,19 @@ async function withProvider(providers, fn) {
     }
     throw e;
   }
+}
+
+// 所有能力调用的唯一入口：strategy(capability, eligibleProviders, attempt)，attempt(provider) 对指定 provider 执行一次
+function withProvider(capability, providers, fn) {
+  const eligible = eligibleProviders(providers);
+  if (!eligible.length) return Promise.reject(new Error(NO_PROVIDER));
+  const attempt = (provider) => {
+    if (!usable(provider)) {
+      return Promise.reject(Object.assign(new Error(NO_PROVIDER), { code: 'provider_unusable' }));
+    }
+    return fn(provider);
+  };
+  return (hooks.getStrategy() || defaultStrategy)(capability, eligible, attempt);
 }
 
 function apiUrl(provider, endpoint) {
@@ -421,11 +442,11 @@ async function testProvider(type, provider) {
 }
 
 // 数组入口：取第一个启用的 provider 执行
-const chatF = (providers, messages, opts) => withProvider(providers, (p) => chat(p, messages, opts));
-const chatCompletionF = (providers, messages, opts) => withProvider(providers, (p) => chatCompletion(p, messages, opts));
-const chatJsonF = (providers, messages, opts) => withProvider(providers, (p) => chatJson(p, messages, opts));
+const chatF = (providers, messages, opts) => withProvider('chat', providers, (p) => chat(p, messages, opts));
+const chatCompletionF = (providers, messages, opts) => withProvider('chat', providers, (p) => chatCompletion(p, messages, opts));
+const chatJsonF = (providers, messages, opts) => withProvider('chat', providers, (p) => chatJson(p, messages, opts));
 const embedF = (providers, texts) =>
-  withProvider(providers, (p) => {
+  withProvider('embeddings', providers, (p) => {
     if (p.type === 'local') {
       const localModels = require('./localModels'); // 懒加载：本机 BGE，离线免费
       return localModels.embed(texts, p.model);

@@ -1,5 +1,5 @@
 'use strict';
-const { app, BrowserWindow, Tray, Menu, nativeImage, protocol } = require('electron');
+const { app, BrowserWindow, Tray, Menu, nativeImage, protocol, powerMonitor } = require('electron');
 const path = require('path');
 const settings = require('./settings');
 const ipc = require('./ipc');
@@ -8,6 +8,7 @@ const { makeT } = require('../shared/locales');
 const { isTrustedRendererNavigation } = require('./runtimeSecurity');
 const { createQuickSearch } = require('./quickSearch');
 const extensions = require('./extensions');
+const hooks = require('./hooks');
 
 // Must run before app ready; the scheme only serves the verified Pro renderer bundle.
 protocol.registerSchemesAsPrivileged([{ scheme: extensions.PRO_SCHEME, privileges: { standard: true, secure: true } }]);
@@ -77,8 +78,10 @@ function openWindow(view) {
       pendingAutoScan = null;
     }
   });
+  hooks.emit('window:open', { window: 'main' });
   win.on('closed', () => {
     win = null;
+    hooks.emit('window:closed', { window: 'main' });
     // 托盘驻留时不占 Dock：纯托盘存在，重开窗口时恢复
     if (process.platform === 'darwin' && settings.get().app.trayKeepAlive) app.dock?.hide();
   });
@@ -158,7 +161,9 @@ app.whenReady().then(() => {
   if (!settings.get().stats.firstRunAt) settings.set({ stats: { firstRunAt: Date.now() } });
   settings.seedCleanupFolders(); // 识别 下载/桌面 → 添加为未启用条目（存量用户；新用户在 folders:detect 后）
   ipc.register(() => win, { onSettingsChanged: applyAppSettings, getQuickSearchStatus: () => quickSearch?.status?.() });
-  quickSearch = createQuickSearch({ openWindow });
+  quickSearch = createQuickSearch({ openWindow, emit: hooks.emit });
+  powerMonitor.on('on-battery', () => hooks.emit('power:battery'));
+  powerMonitor.on('on-ac', () => hooks.emit('power:ac'));
   quickSearch.start();
   createTray();
   scheduler.start({ openWindow, getWindow: () => win });
@@ -166,7 +171,12 @@ app.whenReady().then(() => {
 
   const pro = extensions.getManager();
   protocol.handle(extensions.PRO_SCHEME, (request) => pro.handleProtocol(request));
-  pro.load().then(() => pro.events.emit('app:ready'));
+  pro.load().then(() => {
+    pro.events.emit('app:ready');
+    // Windows opened before activation are announced once so the extension starts with the right state.
+    if (win && !win.isDestroyed()) hooks.emit('window:open', { window: 'main' });
+    if (quickSearch?.isOpen()) hooks.emit('window:open', { window: 'quick-search' });
+  });
 
   // 登录项静默启动 → 托盘 only；手动启动 → 打开界面；ToS 未同意时必须开窗展示
   const hiddenLaunch =

@@ -223,6 +223,7 @@
             <label class="check"><input type="checkbox" id="prefMetered" /><span data-i18n="pref_metered"></span></label>
           </div>
         </div>
+        <div data-ext-slot="prefs:performance"></div>
 
         <div class="panel">
           <div class="panel-head"><h2 data-i18n="sto_title"></h2><button class="btn ghost" id="btnStoRefresh" data-i18n="sto_refresh"></button></div>
@@ -240,7 +241,8 @@
             <summary>Advanced provider configuration</summary>
             <div class="provider-list" id="providers-chat"></div>
           </details>
-          <p class="hint" data-i18n="prov_hint_chat"></p>
+          <p class="hint" id="providerSingleHint" data-i18n="prov_hint_chat"></p>
+          <p class="hint hidden" id="providerMultiHint" data-i18n="drag_hint"></p>
         </div>
 
         <div class="panel">
@@ -249,6 +251,8 @@
           <p class="hint" data-i18n="prov_hint_emb"></p>
         </div>
 
+        <div data-ext-slot="capability:image"></div>
+        <div data-ext-slot="capability:transcription"></div>
       </div>
 
       <div class="tab-page hidden" id="tab-extraction">

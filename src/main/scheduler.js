@@ -2,6 +2,7 @@
 // 定期扫描过期文件；发现结果发系统通知（点击打开窗口）。
 const { Notification } = require('electron');
 const settings = require('./settings');
+const hooks = require('./hooks');
 const stale = require('./stale');
 const { makeT } = require('../shared/locales');
 
@@ -12,7 +13,15 @@ let lastFound = [];
 
 function intervalMs() {
   const hours = Math.max(0.25, settings.get().cleanup.scanIntervalHours || 6);
-  return hours * 3600 * 1000;
+  const base = hours * 3600 * 1000;
+  const filter = hooks.getIntervalFilter();
+  if (!filter) return base;
+  try {
+    const filtered = Number(filter(base));
+    return Number.isFinite(filtered) && filtered > 0 ? Math.min(filtered, 2 ** 31 - 1) : base;
+  } catch {
+    return base;
+  }
 }
 
 function notify(body, onClick) {
@@ -111,4 +120,4 @@ function restart() {
   arm();
 }
 
-module.exports = { start, restart, tick, getLastFound: () => lastFound };
+module.exports = { start, restart, rearm: arm, tick, getLastFound: () => lastFound };

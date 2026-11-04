@@ -2,6 +2,12 @@
 const api = window.epologue;
 const $ = (sel) => document.querySelector(sel);
 
+// Surface the Pro renderer bundle configures; it is read at render time and has no effect while the defaults stand.
+window.epilogueExt = { providerList: { multi: false } };
+const providerListMulti = () => window.epilogueExt.providerList.multi === true;
+const SLOTS = ['pro:panels', 'capability:transcription', 'capability:image', 'prefs:performance'];
+const dispatchSlot = (slot) => window.dispatchEvent(new CustomEvent('epilogue:slot-render', { detail: { slot } }));
+
 // 跨平台：Windows 反斜杠 / POSIX 斜杠都能取文件名
 const basename = (p) => (p || '').split(/[\\/]/).pop();
 const fmtSize = (n) => (n > 1 << 30 ? (n / (1 << 30)).toFixed(1) + ' GB' : n > 1 << 20 ? (n / (1 << 20)).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB');
@@ -813,7 +819,7 @@ $('#providerSourceList').addEventListener('click', async (e) => {
   option.disabled = true;
   showProviderSourceError();
   try {
-    const result = await api.providerSourceAdd(option.dataset.sourceId);
+    const result = await api.providerSourceAdd(option.dataset.sourceId, providerListMulti());
     currentSettings = result.settings;
     renderProviders('chat');
     closeProviderSource();
@@ -831,7 +837,7 @@ $('#providerSourceOverlay').addEventListener('click', async (e) => {
     authorize.textContent = t('oauth_authorizing');
     showProviderSourceError();
     try {
-      const result = await api.oauthAuthorize(provider);
+      const result = await api.oauthAuthorize(provider, providerListMulti());
       if (!result.ok) throw new Error(result.reason || t('oauth_failed'));
       currentSettings = result.settings;
       renderProviders('chat');
@@ -858,7 +864,7 @@ $('#providerSourceOverlay').addEventListener('click', async (e) => {
   }
 });
 $('#providerSourceCustom').addEventListener('click', () => {
-  currentSettings.providers.chat.forEach((item) => { item.enabled = false; });
+  if (!providerListMulti()) currentSettings.providers.chat.forEach((item) => { item.enabled = false; });
   currentSettings.providers.chat.push({ name: '', protocol: 'openai-compatible', baseUrl: '', apiKey: '', model: '' });
   renderProviders('chat');
   closeProviderSource();
@@ -999,20 +1005,27 @@ function speedOf(p) {
   return s.speed ? s.speed | 0 : null;
 }
 
-// 行布局：内容 | …… | 启用（右侧，同类仅一个生效）| ✕ 删除（最右，内置/本机无）
+// 行布局：[拖动手柄（多选模式）] | 内容 | …… | 启用（右侧；默认同类仅一个生效）| ✕ 删除（最右，内置/本机无）
 function renderProviders(type) {
   const list = currentSettings.providers[type];
   const container = $(`#providers-${type}`);
+  const multi = providerListMulti();
   const activeIndex = list.findIndex((p) => p.enabled !== false);
+  container.classList.toggle('multi', multi);
+  $('#providerSingleHint')?.classList.toggle('hidden', multi);
+  $('#providerMultiHint')?.classList.toggle('hidden', !multi);
+  const rowAttrs = (i) => (multi ? ` draggable="true" data-drag="${type}.${i}"` : '');
+  const handle = multi ? '<span class="drag-handle">⠿</span>' : '';
   container.innerHTML = list
     .map((p, i) => {
       const locked = p.keyless || p.type === 'local'; // 免 Key/本机连接锁定关键字段（无 tag）
       const oauth = Boolean(p.oauthProvider);
-      const enableBox = `<label class="check enable-box" title="${t('enabled_label')}"><input type="checkbox" data-p-en="${type}.${i}" ${i === activeIndex ? 'checked' : ''} /></label>`;
+      const enableBox = `<label class="check enable-box" title="${t('enabled_label')}"><input type="checkbox" data-p-en="${type}.${i}" ${(multi ? p.enabled !== false : i === activeIndex) ? 'checked' : ''} /></label>`;
       const xBtn = locked ? '<span class="x-spacer"></span>' : `<button class="x-btn" data-p-rm="${type}.${i}" title="${t('remove')}">✕</button>`;
       if (p.type === 'local') {
         // 本机 embedding：模型名 + 支持文件状态 + 下载/删除 + 进度条
-        return `<div class="provider-row local-row">
+        return `<div class="provider-row local-row"${rowAttrs(i)}>
+          ${handle}
           <span class="model-name">${esc(p.name)} · ${esc(p.model)}</span>
           <span class="badge" data-model-status="${esc(p.model)}">…</span>
           <button class="mini-btn hidden" data-model-dl="${type}.${i}">${t('model_download')}</button>
@@ -1044,7 +1057,8 @@ function renderProviders(type) {
       const credentialField = oauth
         ? `<button type="button" class="mini-btn oauth-manage-btn" data-oauth-manage="${esc(p.oauthProvider)}">${t('oauth_connected')}</button>`
         : `<input type="password" data-p="${type}.${i}.apiKey" value="${esc(p.apiKey || '')}" placeholder="${esc(p.source?.env?.[0] || (p.keyless ? t('ph_keyless') : t('ph_apikey')))}" ${locked && p.baseUrl?.includes('pollinations') ? 'disabled' : ''} />`;
-      return `<div class="provider-row">
+      return `<div class="provider-row"${rowAttrs(i)}>
+        ${handle}
         <input type="text" data-p="${type}.${i}.name" value="${esc(p.name || '')}" placeholder="${t('ph_name')}" ${locked ? 'disabled' : ''} />
         ${protocolSelect}
         <input type="text" data-p="${type}.${i}.baseUrl" value="${esc(p.baseUrl || '')}" placeholder="${t('ph_baseurl')}" ${locked || oauth ? 'disabled' : ''} />
@@ -1099,9 +1113,13 @@ document.body.addEventListener('change', (e) => {
   const en = e.target.closest('[data-p-en]');
   if (en) {
     const [type, i] = en.dataset.pEn.split('.');
-    // 每类能力只启用一个 provider
-    currentSettings.providers[type].forEach((p, index) => { p.enabled = index === +i ? en.checked : en.checked ? false : p.enabled; });
-    renderProviders(type);
+    if (providerListMulti()) {
+      currentSettings.providers[type][+i].enabled = en.checked;
+    } else {
+      // 每类能力只启用一个 provider
+      currentSettings.providers[type].forEach((p, index) => { p.enabled = index === +i ? en.checked : en.checked ? false : p.enabled; });
+      renderProviders(type);
+    }
   }
 });
 
@@ -1193,6 +1211,38 @@ document.body.addEventListener('click', async (e) => {
   }
 });
 
+/* ---------- Provider 拖动排序（仅多选模式） ---------- */
+let dragSrc = null;
+document.body.addEventListener('dragstart', (e) => {
+  const row = e.target.closest('[data-drag]');
+  if (row) {
+    dragSrc = row.dataset.drag;
+    row.classList.add('dragging');
+  }
+});
+document.body.addEventListener('dragover', (e) => {
+  if (e.target.closest('[data-drag]')) e.preventDefault();
+});
+document.body.addEventListener('drop', (e) => {
+  const row = e.target.closest('[data-drag]');
+  if (!row || !dragSrc) return;
+  e.preventDefault();
+  const [srcType, srcI] = dragSrc.split('.');
+  const [dstType, dstI] = row.dataset.drag.split('.');
+  if (srcType === dstType && srcI !== dstI) {
+    const list = currentSettings.providers[srcType];
+    const [moved] = list.splice(+srcI, 1);
+    list.splice(+dstI, 0, moved);
+    renderProviders(srcType);
+    autoSaveNow('settings');
+  }
+  dragSrc = null;
+});
+document.body.addEventListener('dragend', () => {
+  document.querySelectorAll('.dragging').forEach((el) => el.classList.remove('dragging'));
+  dragSrc = null;
+});
+
 document.body.addEventListener('input', (e) => {
   const bind = e.target.closest('[data-p]');
   if (bind) {
@@ -1246,6 +1296,7 @@ function loadSettingsForm(st) {
   renderSearchSeg();
   renderChat();
   syncSelectProxies();
+  SLOTS.slice(1).forEach(dispatchSlot);
 }
 
 /* ---------- 存储占用（索引 / 日志 / 模型 / 本体）与按类型清理 ---------- */
@@ -1514,7 +1565,7 @@ function renderProView() {
   $('#btnProRemove').classList.toggle('hidden', !pkg && !st.packageError);
   $('#btnProRestart').classList.toggle('hidden', !st.restartRequired);
 
-  window.dispatchEvent(new CustomEvent('epilogue:slot-render', { detail: { slot: 'pro:panels' } }));
+  SLOTS.forEach(dispatchSlot);
 }
 
 function loadProRenderer() {
@@ -1522,7 +1573,10 @@ function loadProRenderer() {
   proScriptLoaded = true;
   const script = document.createElement('script');
   script.src = 'epilogue-pro://ext/renderer.js';
-  script.onload = renderProView;
+  script.onload = () => {
+    renderProView();
+    if (currentSettings) PROVIDER_TYPES.forEach(renderProviders);
+  };
   document.head.append(script);
 }
 

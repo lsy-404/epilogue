@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const llm = require('./llm');
 const settings = require('./settings');
+const hooks = require('./hooks');
 const { kindOf } = require('./extractors'); // extract 本体在 modelHost 子进程执行
 
 const SKIP_DIRS = new Set(['node_modules', '.git', '.Trash', 'Library', '$RECYCLE.BIN', 'System Volume Information']);
@@ -47,13 +48,20 @@ async function indexFile(filePath, store, onProgress = () => {}, { nameOnly = fa
   // 1. 提取文本；nameOnly：只索引文件名，不读内容（云占位文件读内容会触发下载）
   const kind = kindOf(filePath);
   let content = '';
+  let preview;
   if (nameOnly) {
     onProgress({ file: fileName, stage: '文件名索引…' });
   } else {
     onProgress({ file: fileName, stage: '提取内容…' });
-    // 提取在 modelHost 子进程执行，主进程事件循环不被同步解析阻塞
-    const localModels = require('./localModels');
-    content = (await localModels.extractRemote(filePath, cfg.extraction)).content;
+    const extension = await hooks.runExtractor(kind, filePath, { maxChars: cfg.extraction.maxChars });
+    if (extension) {
+      content = extension.content.slice(0, cfg.extraction.maxChars);
+      preview = extension.preview;
+    } else {
+      // 提取在 modelHost 子进程执行，主进程事件循环不被同步解析阻塞
+      const localModels = require('./localModels');
+      content = (await localModels.extractRemote(filePath, cfg.extraction)).content;
+    }
   }
 
   // 2. 本地摘要 + 关键词（不调 AI）
@@ -62,6 +70,18 @@ async function indexFile(filePath, store, onProgress = () => {}, { nameOnly = fa
 
   // 3. 向量化（embeddings 未配置则留空，检索自动降级关键词匹配）
   let vector = null;
+  let vecSpace;
+  const space = nameOnly ? null : hooks.vectorSpaceFor(kind);
+  if (space) {
+    onProgress({ file: fileName, stage: '向量化…' });
+    try {
+      vector = (await space.embedFile(filePath)) || null;
+      if (vector) vecSpace = space.id;
+    } catch (e) {
+      log('index', `${space.id} embed failed: ${fileName}`, { error: String(e.message || e).slice(0, 200) });
+      vector = null;
+    }
+  }
   const network = require('./network');
   const embProviders = llm.localOnlyFilter(cfg.providers.embeddings, cfg.app.avoidCloudOnMetered && network.isMetered());
   // 二进制等非文档文件（无可提取文本）不做 embedding，仅靠文件名+摘要可检索；
@@ -74,6 +94,7 @@ async function indexFile(filePath, store, onProgress = () => {}, { nameOnly = fa
       const dirHint = path.dirname(filePath).split(/[\\/]/).filter(Boolean).slice(-2).join('/');
       const text = nameOnly ? `${dirHint}/${fileName}` : `${dirHint}/${fileName}\n${content.slice(0, 2000)}`;
       [vector] = await llm.embedF(embProviders, [text]);
+      vecSpace = hooks.TEXT_SPACE;
     } catch (e) {
       log('index', `embed failed: ${fileName}`, { error: String(e.message || e).slice(0, 200) });
       vector = null;
@@ -87,7 +108,9 @@ async function indexFile(filePath, store, onProgress = () => {}, { nameOnly = fa
     kind,
     summary: meta.summary || '',
     keywords: meta.keywords || [],
+    ...(preview ? { transcriptPreview: preview.slice(0, 500) } : {}),
     vector,
+    vecSpace: vector ? vecSpace : undefined,
     sizeBytes: stat.size,
     fileMtime: stat.mtimeMs, // 文件日期，供 Library 滑条筛选
     indexedMode: nameOnly ? 'name' : 'full', // name = 仅文件名（云占位等），将来允许读内容时可升级重索

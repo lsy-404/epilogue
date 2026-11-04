@@ -10,7 +10,7 @@ const { queryLibrary } = require('./libraryQuery');
 const DEFAULT_ACCELERATOR = 'CommandOrControl+Shift+Space';
 const SHORTCUTS = new Set([DEFAULT_ACCELERATOR, 'CommandOrControl+Alt+Space', 'CommandOrControl+Shift+F', '']);
 
-function createQuickSearch({ openWindow }) {
+function createQuickSearch({ openWindow, emit = () => {} }) {
   let popup = null;
   let registered = false;
   let handlersRegistered = false;
@@ -104,6 +104,7 @@ function createQuickSearch({ openWindow }) {
     popup.webContents.on('will-navigate', (event) => event.preventDefault());
     popup.setMenuBarVisibility(false);
     popup.loadFile(path.join(__dirname, '..', 'renderer', 'quick-search.html'));
+    emit('window:open', { window: 'quick-search' });
     popup.once('ready-to-show', () => {
       position();
       popup.show();
@@ -111,6 +112,7 @@ function createQuickSearch({ openWindow }) {
     });
     popup.on('closed', () => {
       popup = null;
+      emit('window:closed', { window: 'quick-search' });
     });
     popup.on('blur', () => {
       if (popup && !popup.isDestroyed()) popup.destroy();

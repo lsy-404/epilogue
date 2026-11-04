@@ -25,7 +25,7 @@ function load(overrides = {}) {
   const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'main', 'quickSearch.js'), 'utf8'); const module = { exports: {} };
   const localRequire = (request) => ({ electron, './settings': settings, './ipc': ipc, './libraryQuery': { queryLibrary: () => ({ rows: [] }) } }[request] || require(request));
   vm.runInNewContext(source, { require: localRequire, module, exports: module.exports, __dirname: path.join(__dirname, '..', 'src', 'main'), process, console });
-  let opened = 0; const controller = module.exports.createQuickSearch({ openWindow: () => opened++ });
+  let opened = 0; const controller = module.exports.createQuickSearch({ openWindow: () => opened++, emit: overrides.emit });
   return { controller, handlers, windows, counters, opened: () => opened, file, shortcutCalls };
 }
 
@@ -62,4 +62,14 @@ test('popup reuse, navigation denial, and destruction respect lifecycle', () => 
   const navigate = { preventDefault: () => { navigate.prevented = true; } }; first.webContents.emit('will-navigate', navigate); assert.equal(navigate.prevented, true);
   live.controller.show(); assert.equal(live.windows.length, 1); assert.equal(live.counters.focus > 0, true); first.destroy();
   const idle = load(); idle.controller.show(); idle.windows[0].destroy(); idle.controller.show(); assert.equal(idle.windows.length, 2);
+});
+
+test('the popup announces window:open and window:closed with its name', () => {
+  const events = [];
+  const x = load({ emit: (event, payload) => events.push([event, payload]) });
+  x.controller.show();
+  x.controller.show();
+  assert.equal(JSON.stringify(events), JSON.stringify([['window:open', { window: 'quick-search' }]]));
+  x.windows[0].destroy();
+  assert.equal(JSON.stringify(events.at(-1)), JSON.stringify(['window:closed', { window: 'quick-search' }]));
 });

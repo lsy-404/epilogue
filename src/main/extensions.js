@@ -3,19 +3,14 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const vm = require('node:vm');
-const { builtinModules } = require('node:module');
+const hooks = require('./hooks');
+const { restrictedRequire } = require('../shared/restrictedRequire');
 const { PRO_API, MANIFEST_NAME, SIGNATURE_NAME, VERSION, ProError, toProError, getProductionVerifier } = require('./proVerify');
 
 const PRO_SCHEME = 'epilogue-pro';
 const IPC_NAME = /^[a-z][a-z0-9:-]{0,63}$/;
 const MAX_PACKAGE_BYTES = 64 * 1024 * 1024;
 const MAX_LICENSE_BYTES = 4096;
-
-const BUILTINS = new Set(builtinModules);
-function restrictedRequire(id) {
-  if (typeof id === 'string' && (id.startsWith('node:') || BUILTINS.has(id))) return require(id);
-  throw new Error(`require of '${id}' is not allowed in extensions`);
-}
 
 function createEventBus(onError) {
   const listeners = new Map();
@@ -85,6 +80,8 @@ function createExtensionManager({
   ipcHandle,
   ipcRemove = () => {},
   now = () => new Date(),
+  core = {},
+  chmod = fs.chmodSync,
 }) {
   const proDir = path.join(userData, 'pro');
   const extDir = path.join(proDir, 'ext');
@@ -190,6 +187,7 @@ function createExtensionManager({
       fs.writeFileSync(path.join(staging, MANIFEST_NAME), manifestBytes);
       fs.writeFileSync(path.join(staging, SIGNATURE_NAME), sigBytes);
       for (const [name, data] of files) fs.writeFileSync(path.join(staging, name), data);
+      if (platform !== 'win32') for (const name of manifest.executables ?? []) chmod(path.join(staging, name), 0o755);
       let replaced = null;
       if (fs.existsSync(target)) {
         replaced = `${target}.old-${crypto.randomBytes(6).toString('hex')}`;
@@ -294,12 +292,16 @@ function createExtensionManager({
     };
   }
 
-  function buildApi(license, { bus, channels }) {
+  function buildApi(license, { bus, channels }, packageDir) {
+    const unavailable = () => {
+      throw new Error('This core hook is not available');
+    };
+    const modelHost = core.modelHost ?? {};
     return Object.freeze({
       PRO_API,
       version: coreVersion,
       license,
-      paths: Object.freeze({ userData, proDir, extDir }),
+      paths: Object.freeze({ userData, proDir, extDir, packageDir }),
       log: (scope, msg, data) => log(`pro/${String(scope)}`, String(msg), data),
       settings: Object.freeze({
         get: () => structuredClone(settings.get()),
@@ -316,6 +318,25 @@ function createExtensionManager({
           channels.push(channel);
         },
       }),
+      modelHost: Object.freeze({
+        call(op, ...args) {
+          if (typeof op !== 'string' || !op || op.startsWith('__')) throw new Error('Invalid model host op');
+          return (modelHost.call ?? unavailable)(op, ...args);
+        },
+        pid: () => modelHost.pid?.() ?? null,
+      }),
+      extractors: Object.freeze({ register: hooks.registerExtractor }),
+      vectorSpaces: Object.freeze({ register: hooks.registerVectorSpace }),
+      providers: Object.freeze({ setStrategy: hooks.setStrategy }),
+      lifecycle: Object.freeze({
+        stopHost: () => core.lifecycle?.stopHost() ?? false,
+        dropStore: () => core.lifecycle?.dropStore() ?? false,
+      }),
+      scheduler: Object.freeze({
+        setIntervalFilter: hooks.setIntervalFilter,
+        rearm: () => core.scheduler?.rearm(),
+      }),
+      power: Object.freeze({ onBattery: () => core.power?.onBattery() ?? false }),
     });
   }
 
@@ -341,8 +362,16 @@ function createExtensionManager({
       const renderer = files.get(manifest.entries.renderer);
       const current = { bus: newBus(), channels: [] };
       activation = current;
+      hooks.attach(current.bus.emit);
       try {
-        await mod.exports.activate(buildApi(license, current));
+        if (manifest.entries.host) {
+          core.modelHost?.setModule({
+            source: files.get(manifest.entries.host).toString('utf8'),
+            filename: path.join(dir, manifest.entries.host),
+            packageDir: dir,
+          });
+        }
+        await mod.exports.activate(buildApi(license, current, dir));
       } catch (error) {
         if (activation === current) deactivate();
         throw error;
@@ -366,6 +395,8 @@ function createExtensionManager({
     if (!current) return;
     current.bus.emit('pro:deactivate');
     for (const channel of current.channels) ipcRemove(channel);
+    hooks.reset();
+    core.modelHost?.setModule(null);
   }
 
   function rendererSource() {
@@ -396,10 +427,20 @@ function createExtensionManager({
   };
 }
 
+// Maps the runtime modules onto the hook surface the extension manager exposes; tests pass fakes instead.
+function createCore({ localModels, ipc, scheduler, onBattery }) {
+  return {
+    modelHost: { setModule: localModels.setHostModule, call: localModels.hostCall, pid: localModels.hostPid },
+    lifecycle: { stopHost: localModels.stopHostIfIdle, dropStore: ipc.dropStore },
+    scheduler: { rearm: scheduler.rearm },
+    power: { onBattery },
+  };
+}
+
 let manager = null;
 function getManager() {
   if (manager) return manager;
-  const { app, ipcMain } = require('electron');
+  const { app, ipcMain, powerMonitor } = require('electron');
   const settings = require('./settings');
   const { log } = require('./log');
   const ipc = require('./ipc');
@@ -414,6 +455,12 @@ function getManager() {
     log,
     ipcHandle: ipc.handleTrusted,
     ipcRemove: (channel) => ipcMain.removeHandler(channel),
+    core: createCore({
+      localModels: require('./localModels'),
+      ipc,
+      scheduler: require('./scheduler'),
+      onBattery: () => powerMonitor.isOnBatteryPower(),
+    }),
   });
   return manager;
 }
@@ -423,6 +470,7 @@ module.exports = {
   PRO_SCHEME,
   IPC_NAME,
   createExtensionManager,
+  createCore,
   getManager,
   ProError,
 };

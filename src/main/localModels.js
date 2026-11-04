@@ -4,6 +4,7 @@
 const { app, utilityProcess } = require('electron');
 const fs = require('fs');
 const path = require('path');
+const hooks = require('./hooks');
 
 const DEFAULT_EMBED_MODEL = 'Xenova/bge-small-zh-v1.5';
 
@@ -17,6 +18,21 @@ let seq = 0;
 const pending = new Map(); // id -> {resolve, reject, host}
 const progressListeners = new Set();
 let hostEnvironment = null;
+let hostModule = null; // { source, filename, packageDir } of the active extension's host entry
+
+function postRegistration(host) {
+  host.postMessage({ op: '__register', args: [hostModule] });
+}
+
+// Replaces the extension host module; a running host picks it up immediately, a later start registers it on spawn.
+function setHostModule(module) {
+  hostModule = module ?? null;
+  if (child) postRegistration(child);
+}
+
+function releaseCall(id) {
+  if (pending.delete(id) && pending.size === 0) hooks.emit('host:idle');
+}
 
 function ensureChild() {
   if (child) return child;
@@ -30,14 +46,19 @@ function ensureChild() {
     },
   });
   child = host;
+  if (hostModule) postRegistration(host);
   host.on('message', (msg) => {
+    if (msg.hostlog) {
+      require('./log').log('models', msg.hostlog.msg, msg.hostlog.extra);
+      return;
+    }
     if (msg.progress) {
       for (const cb of progressListeners) cb(msg.progress);
       return;
     }
     const p = pending.get(msg.id);
     if (p) {
-      pending.delete(msg.id);
+      releaseCall(msg.id);
       msg.ok ? p.resolve(msg.result) : p.reject(new Error(msg.error));
     }
   });
@@ -47,7 +68,7 @@ function ensureChild() {
     const affected = [...pending.entries()].filter(([, p]) => p.host === host);
     require('./log').log('models', 'host exited', { pendingCalls: affected.length });
     for (const [id, p] of affected) {
-      pending.delete(id);
+      releaseCall(id);
       p.reject(new Error('模型进程已退出（可能内存不足），将自动重启，请重试'));
     }
   });
@@ -58,11 +79,12 @@ function call(op, ...args) {
   return new Promise((resolve, reject) => {
     const id = ++seq;
     const host = ensureChild();
+    if (pending.size === 0) hooks.emit('host:busy');
     pending.set(id, { resolve, reject, host });
     try {
       host.postMessage({ id, op, args });
     } catch (error) {
-      pending.delete(id);
+      releaseCall(id);
       reject(error);
     }
   });
@@ -78,6 +100,13 @@ function restartHost() {
     }
     child = null;
   }
+}
+
+// Stops the host only when nothing is waiting on it; returns whether it was stopped (or was not running).
+function stopHostIfIdle() {
+  if (pending.size > 0) return false;
+  restartHost();
+  return true;
 }
 
 function applyHostSettings(cfg) {
@@ -171,5 +200,6 @@ function extractRemote(filePath, opts) {
 
 module.exports = {
   status, download, remove, embed, extractRemote,
-  restartHost, applyHostSettings, dirHasOnnx, isSafeModelId, DEFAULT_EMBED_MODEL,
+  restartHost, stopHostIfIdle, setHostModule, applyHostSettings,
+  hostCall: call, hostPid: () => child?.pid ?? null, dirHasOnnx, isSafeModelId, DEFAULT_EMBED_MODEL,
 };

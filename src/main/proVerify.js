@@ -8,6 +8,7 @@ const LICENSE_PREFIX = 'EPRO1.';
 const MAX_FILE_BYTES = 32 * 1024 * 1024;
 const MAX_TOTAL_BYTES = 64 * 1024 * 1024;
 const MAX_ENTRIES = 64;
+const MAX_EXECUTABLES = 8;
 const MANIFEST_NAME = 'manifest.json';
 const SIGNATURE_NAME = 'manifest.sig';
 
@@ -147,6 +148,16 @@ function createVerifier({ extensionKeys = {}, licenseKeys = {} } = {}) {
     }
     for (const key of ['main', 'renderer']) {
       if (typeof entries[key] !== 'string' || !Object.hasOwn(files, entries[key])) throw new ProError('manifest_format');
+    }
+    if (entries.host !== undefined && (typeof entries.host !== 'string' || !Object.hasOwn(files, entries.host))) {
+      throw new ProError('manifest_format');
+    }
+    if (manifest.executables !== undefined) {
+      const list = manifest.executables;
+      if (!Array.isArray(list) || list.length > MAX_EXECUTABLES) throw new ProError('manifest_format');
+      for (const name of list) {
+        if (typeof name !== 'string' || !Object.hasOwn(files, name)) throw new ProError('manifest_format');
+      }
     }
 
     const contents = new Map();

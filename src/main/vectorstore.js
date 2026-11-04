@@ -28,9 +28,10 @@ function hasVec(r) {
   return (r.vecDim || 0) > 0;
 }
 
-// 完整索引的图片记录只可能带 CLIP 向量，与文本 embedding 同为 512 维但不在同一空间
-function hasTextVec(r) {
-  return hasVec(r) && !(r.kind === 'image' && r.indexedMode === 'full');
+// 向量所属空间；旧记录无 vecSpace：完整索引的图片只可能带 CLIP 向量，其余为文本向量
+function spaceOf(r) {
+  if (r.vecSpace) return r.vecSpace;
+  return r.kind === 'image' && r.indexedMode === 'full' ? 'image:clip' : 'text';
 }
 
 function writeAllSync(file, buffer, position = null) {
@@ -260,9 +261,11 @@ class VectorStore {
       this.vectorDirty = true;
     } else if (!hasVector && existing) {
       withId.vecDim = existing.vecDim;
+      if (existing.vecSpace) withId.vecSpace = existing.vecSpace;
     } else {
       const hadPending = this.pendingVec.delete(withId.id);
       delete withId.vecDim;
+      delete withId.vecSpace;
       if ((existing && hasVec(existing)) || hadPending) this.vectorDirty = true;
     }
     if (i >= 0) {
@@ -353,7 +356,7 @@ class VectorStore {
   }
 
   // 向量检索：流扫 bin，固定容量 top-k 堆避免为全部候选排序。
-  searchByVector(queryVector, topK = 8) {
+  searchByVector(queryVector, topK = 8, space = 'text') {
     const q = toF32(queryVector);
     const limit = Math.max(0, Math.floor(Number(topK) || 0));
     if (!q || !limit) return [];
@@ -384,13 +387,13 @@ class VectorStore {
     this._scanBin((id, dim, vecBuf) => {
       if (dim !== q.length || this.pendingVec.has(id)) return;
       const record = this.idIndex.get(id);
-      if (!record || !hasTextVec(record)) return;
+      if (!record || !hasVec(record) || spaceOf(record) !== space) return;
       const view = new Float32Array(vecBuf.buffer, vecBuf.byteOffset, dim);
       consider(record, VectorStore.cosine(q, view));
     });
     for (const [id, f] of this.pendingVec) {
       const record = this.idIndex.get(id);
-      if (record && hasTextVec(record) && f.length === q.length) consider(record, VectorStore.cosine(q, f));
+      if (record && hasVec(record) && spaceOf(record) === space && f.length === q.length) consider(record, VectorStore.cosine(q, f));
     }
     return hits.sort((a, b) => b.score - a.score);
   }
@@ -429,4 +432,4 @@ class VectorStore {
   }
 }
 
-module.exports = { VectorStore, hasVec, toF32 };
+module.exports = { VectorStore, hasVec, spaceOf, toF32 };

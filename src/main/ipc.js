@@ -4,6 +4,7 @@ const { ipcMain, dialog, shell, app, clipboard } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const settings = require('./settings');
+const hooks = require('./hooks');
 const { toProError } = require('./proVerify');
 const { isTrustedIpcEvent } = require('./runtimeSecurity');
 
@@ -15,6 +16,7 @@ const lazy = {
 };
 
 let store;
+let storeUsers = 0;
 let trustedGate = null;
 let settingsChanged = null;
 const modelAuthOperations = new Map();
@@ -28,7 +30,22 @@ function getStore() {
 }
 
 async function withStore(operation) {
-  return operation(getStore());
+  storeUsers++;
+  try {
+    return await operation(getStore());
+  } finally {
+    storeUsers--;
+  }
+}
+
+// 落盘并释放内存中的索引元数据；仍有使用者时拒绝（返回 false），无已加载的库时视为成功
+function dropStore() {
+  if (storeUsers > 0) return false;
+  if (!store) return true;
+  store.flush();
+  require('./log').log('app', 'store dropped', { records: store.stats().total });
+  store = null;
+  return true;
 }
 
 // 寻物三模式：keyword 纯关键字 / match embedding 匹配度（只出命中与分数）/ ai 检索 + LLM 总结
@@ -51,6 +68,20 @@ async function search(s, question, mode) {
       usedVector = hits.length > 0;
     } catch {
       /* embedding 失败 → 退回关键词 */
+    }
+  }
+  // 扩展向量空间（如图像）：各空间用自己的查询向量检索，与文本命中合并去重
+  if (wantVector) {
+    for (const space of hooks.vectorSpaces()) {
+      try {
+        const queryVector = await space.embedQuery(question);
+        if (!queryVector) continue;
+        const extra = s.searchByVector(queryVector, 8, space.id).filter((h) => !hits.some((x) => x.record.filePath === h.record.filePath));
+        hits = [...hits, ...extra].slice(0, 10);
+        usedVector = usedVector || extra.length > 0;
+      } catch {
+        /* 扩展空间检索失败不影响文本检索结果 */
+      }
     }
   }
   if (!hits.length) hits = s.searchByKeywords(question, 8);
@@ -308,14 +339,15 @@ function register(getWindow, hooks = {}) {
       providers: result.providers.map(({ models, ...provider }) => ({ ...provider, modelCount: models.length })),
     };
   });
-  handle('providers:sourceAdd', async (_e, sourceId) => {
+  handle('providers:sourceAdd', async (_e, sourceId, keepOthers) => {
     const catalog = require('./providerCatalog');
     const source = await catalog.sourceProvider(String(sourceId || ''));
     if (!source) throw new Error('Provider Source was not found.');
     const provider = catalog.providerSettingsFromSource(source);
     const cfg = settings.get();
     const active = { ...provider, enabled: true };
-    const next = [...cfg.providers.chat.map((item) => ({ ...item, enabled: false })), active];
+    const existing = keepOthers === true ? cfg.providers.chat : cfg.providers.chat.map((item) => ({ ...item, enabled: false }));
+    const next = [...existing, active];
     const updated = settings.set({ providers: { chat: next } });
     hooks.onSettingsChanged?.(updated);
     return { provider: active, settings: updated };
@@ -323,13 +355,13 @@ function register(getWindow, hooks = {}) {
 
   // 官方 OAuth：PKCE 在系统浏览器完成，access/refresh token 只保存于主进程的 safeStorage 密文仓库。
   handle('oauth:accounts', (_e, provider) => require('./providerOAuth').listAccounts(String(provider || '')));
-  handle('oauth:authorize', async (_e, provider) => {
+  handle('oauth:authorize', async (_e, provider, keepOthers) => {
     const oauth = require('./providerOAuth');
     try {
       const account = await oauth.authorize(String(provider || ''));
       const preset = await oauth.oauthProviderSettings(String(provider || ''));
       const cfg = settings.get();
-      const chat = cfg.providers.chat.map((item) => ({ ...item, enabled: false }));
+      const chat = keepOthers === true ? [...cfg.providers.chat] : cfg.providers.chat.map((item) => ({ ...item, enabled: false }));
       const index = chat.findIndex((item) => item.oauthProvider === preset.oauthProvider);
       if (index >= 0) chat[index] = { ...chat[index], ...preset, enabled: true };
       else chat.push({ ...preset, enabled: true });
@@ -456,4 +488,4 @@ function register(getWindow, hooks = {}) {
 }
 
 // ask/getStore 供 assistant 复用；flushStore 供退出前落盘（向量库写盘已防抖）
-module.exports = { register, handleTrusted, applySettingsPatch, ask, getStore, withStore, flushStore: () => store?.flush() };
+module.exports = { register, handleTrusted, applySettingsPatch, ask, getStore, withStore, dropStore, flushStore: () => store?.flush() };
