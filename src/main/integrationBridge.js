@@ -20,15 +20,17 @@ function parseArgs(argv) {
   return out;
 }
 
-function launchCommand({ execPath = process.execPath, dir = __dirname } = {}) {
-  const packaged = dir.split(/[\/]/).includes('app.asar');
+// service.json lives at <userData>/pro/, so the launched app must use that same userData directory.
+function launchCommand({ execPath = process.execPath, dir = __dirname, service } = {}) {
+  const packaged = dir.split(/[\\/]/).includes('app.asar');
   const appRoot = path.resolve(dir, '..', '..');
   const flags = ['--hidden', '--epilogue-service'];
+  if (service) flags.push(`--user-data-dir=${path.dirname(path.dirname(path.resolve(service)))}`);
   return { command: execPath, args: packaged ? flags : [appRoot, ...flags] };
 }
 
-function launchApp() {
-  const { command, args } = launchCommand();
+function launchApp(service) {
+  const { command, args } = launchCommand({ service });
   const env = { ...process.env };
   delete env.ELECTRON_RUN_AS_NODE;
   const child = spawn(command, args, { detached: true, stdio: 'ignore', env, windowsHide: true });
@@ -83,7 +85,7 @@ async function connect({ service, client, launch }) {
   };
   let conn = await attempt();
   if (conn || !launch) return conn;
-  launchApp();
+  launchApp(service);
   const deadline = Date.now() + CONNECT_BUDGET_MS;
   while (!conn && Date.now() < deadline) {
     await sleep(RETRY_DELAY_MS);

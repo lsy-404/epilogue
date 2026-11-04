@@ -150,5 +150,9 @@ test('launch arguments differ between packaged and development layouts', () => {
   assert.deepEqual(dev, { command: '/x/electron', args: [path.resolve('/repo'), '--hidden', '--epilogue-service'] });
   const packaged = launchCommand({ execPath: '/x/Epilogue', dir: '/x/resources/app.asar/src/main' });
   assert.deepEqual(packaged, { command: '/x/Epilogue', args: ['--hidden', '--epilogue-service'] });
+  const windows = launchCommand({ execPath: 'C:\\x\\Epilogue.exe', dir: 'C:\\x\\resources\\app.asar\\src\\main' });
+  assert.deepEqual(windows.args, ['--hidden', '--epilogue-service']);
+  const withService = launchCommand({ execPath: '/x/Epilogue', dir: '/x/resources/app.asar/src/main', service: path.join('/data', 'Epilogue', 'pro', 'service.json') });
+  assert.deepEqual(withService.args, ['--hidden', '--epilogue-service', `--user-data-dir=${path.resolve('/data', 'Epilogue')}`]);
   assert.deepEqual(parseArgs(['--service', 'a.json', '--client', 'c', '--no-launch']), { service: 'a.json', client: 'c', launch: false });
 });
