@@ -390,7 +390,10 @@ function createExtensionManager({
           ...(json === true ? { json } : {}),
         });
       },
-      power: Object.freeze({ onBattery: () => core.power?.onBattery() ?? false }),
+      power: Object.freeze({
+        onBattery: () => core.power?.onBattery() ?? false,
+        activity: () => core.power?.activity?.() ?? { idleSeconds: 0, locked: false, appCpuSeconds: 0 },
+      }),
       notify(title, body = '') {
         if (typeof title !== 'string' || !title.trim() || typeof body !== 'string') throw new Error('title must be a non-empty string and body a string');
         return (core.notify ?? unavailable)(title.slice(0, MAX_NOTIFY_TITLE), body.slice(0, MAX_NOTIFY_BODY));
@@ -486,7 +489,7 @@ function createExtensionManager({
 }
 
 // Maps the runtime modules onto the hook surface the extension manager exposes; tests pass fakes instead.
-function createCore({ localModels, ipc, scheduler, onBattery, notify, llm, settings }) {
+function createCore({ localModels, ipc, scheduler, onBattery, activity, notify, llm, settings }) {
   return {
     index: { records: () => ipc.withStore((store) => structuredClone(store.all())) },
     extract: async (filePath) => ({ content: (await localModels.extractRemote(filePath, settings.get().extraction)).content }),
@@ -508,7 +511,7 @@ function createCore({ localModels, ipc, scheduler, onBattery, notify, llm, setti
     modelHost: { setModule: localModels.setHostModule, call: localModels.hostCall, pid: localModels.hostPid },
     lifecycle: { stopHost: localModels.stopHostIfIdle, dropStore: ipc.dropStore },
     scheduler: { rearm: scheduler.rearm, kickJobs: scheduler.kickJobs },
-    power: { onBattery },
+    power: { onBattery, activity },
     notify,
   };
 }
@@ -538,6 +541,11 @@ function getManager() {
       ipc,
       scheduler: require('./scheduler'),
       onBattery: () => powerMonitor.isOnBatteryPower(),
+      activity: () => ({
+        idleSeconds: powerMonitor.getSystemIdleTime(),
+        locked: powerMonitor.getSystemIdleState(1) === 'locked',
+        appCpuSeconds: app.getAppMetrics().reduce((sum, m) => sum + (m.cpu?.cumulativeCPUUsage ?? 0), 0),
+      }),
       notify: (title, body) => {
         if (Notification.isSupported()) new Notification({ title, body }).show();
       },

@@ -197,7 +197,7 @@ test('the api object exposes exactly the documented members', async () => {
   assert.deepEqual(shape(api.index), ['onIndexed', 'onMoved', 'onRemoved', 'records']);
   assert.deepEqual(shape(api.search), ['registerMode', 'spaceHits']);
   assert.deepEqual(shape(api.assistant), ['registerTools']);
-  assert.deepEqual(shape(api.power), ['onBattery']);
+  assert.deepEqual(shape(api.power), ['activity', 'onBattery']);
   mgr.deactivate();
 });
 
@@ -209,6 +209,7 @@ test('api hooks reach the runtime: model host calls, stopHost, dropStore, rearm 
     ipc: { dropStore: () => { seen.dropped += 1; return false; } },
     scheduler: { rearm: () => { seen.rearmed += 1; } },
     onBattery: () => true,
+    activity: () => ({ idleSeconds: 42, locked: true, appCpuSeconds: 1.5 }),
   });
   const { mgr } = manager({ core });
   mgr.installPackage(hostPackage());
@@ -226,6 +227,7 @@ test('api hooks reach the runtime: model host calls, stopHost, dropStore, rearm 
   scheduler.rearm();
   assert.deepEqual(seen, { dropped: 1, rearmed: 1 });
   assert.equal(power.onBattery(), true);
+  assert.deepEqual(power.activity(), { idleSeconds: 42, locked: true, appCpuSeconds: 1.5 });
   mgr.deactivate();
 });
 
