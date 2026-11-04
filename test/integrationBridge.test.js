@@ -127,6 +127,16 @@ test('a missing service file with --no-launch replies with the error and nothing
   assert.match(out.stderr, /Epilogue Pro/);
 });
 
+test('without an installed Pro package the relay fails at once instead of launching the app', async (t) => {
+  const dir = tmpDir(t);
+  const started = Date.now();
+  const { child, out, exited } = runBridge(['--service', path.join(dir, 'pro', 'service.json')]);
+  child.stdin.write('{"jsonrpc":"2.0","id":7,"method":"initialize"}\n');
+  assert.equal(await exited, 1);
+  assert.ok(Date.now() - started < 5000);
+  assert.equal(out.stdout, `${JSON.stringify({ jsonrpc: '2.0', id: 7, error: { code: -32000, message: NOT_RUNNING } })}\n`);
+});
+
 test('a notification as the first message gets no reply', async (t) => {
   const dir = tmpDir(t);
   const { child, out, exited } = runBridge(['--service', path.join(dir, 'absent.json'), '--no-launch']);

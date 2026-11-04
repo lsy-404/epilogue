@@ -84,7 +84,8 @@ async function connect({ service, client, launch }) {
     return info ? connectOnce(info, client) : null;
   };
   let conn = await attempt();
-  if (conn || !launch) return conn;
+  // Without an installed Pro package the service can never start, so launching would only leave a hidden app behind.
+  if (conn || !launch || !fs.existsSync(path.join(path.dirname(path.resolve(service)), 'current.json'))) return conn;
   launchApp(service);
   const deadline = Date.now() + CONNECT_BUDGET_MS;
   while (!conn && Date.now() < deadline) {
