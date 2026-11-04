@@ -186,7 +186,7 @@ test('the api object exposes exactly the documented members', async () => {
   await mgr.load();
   const api = globalThis.__proApi;
   const shape = (value) => Object.keys(value).sort();
-  assert.deepEqual(shape(api), ['PRO_API', 'assistant', 'chat', 'embedLocal', 'events', 'extract', 'extractors', 'index', 'ipc', 'license', 'lifecycle', 'log', 'modelHost', 'paths', 'power', 'providers', 'scheduler', 'search', 'settings', 'vectorSpaces', 'version']);
+  assert.deepEqual(shape(api), ['PRO_API', 'assistant', 'chat', 'embedLocal', 'events', 'extract', 'extractors', 'index', 'ipc', 'license', 'lifecycle', 'log', 'modelHost', 'notify', 'paths', 'power', 'providers', 'scheduler', 'search', 'settings', 'vectorSpaces', 'version']);
   assert.deepEqual(shape(api.paths), ['extDir', 'packageDir', 'proDir', 'userData']);
   assert.deepEqual(shape(api.modelHost), ['call', 'pid']);
   assert.deepEqual(shape(api.extractors), ['register']);

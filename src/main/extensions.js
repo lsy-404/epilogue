@@ -12,6 +12,8 @@ const IPC_NAME = /^[a-z][a-z0-9:-]{0,63}$/;
 const MAX_PACKAGE_BYTES = 64 * 1024 * 1024;
 const MAX_LICENSE_BYTES = 4096;
 const MAX_EMBED_TEXTS = 256;
+const MAX_NOTIFY_TITLE = 120;
+const MAX_NOTIFY_BODY = 400;
 const CHAT_ROLES = new Set(['system', 'user', 'assistant']);
 
 function createEventBus(onError) {
@@ -389,6 +391,10 @@ function createExtensionManager({
         });
       },
       power: Object.freeze({ onBattery: () => core.power?.onBattery() ?? false }),
+      notify(title, body = '') {
+        if (typeof title !== 'string' || !title.trim() || typeof body !== 'string') throw new Error('title must be a non-empty string and body a string');
+        return (core.notify ?? unavailable)(title.slice(0, MAX_NOTIFY_TITLE), body.slice(0, MAX_NOTIFY_BODY));
+      },
     });
   }
 
@@ -480,7 +486,7 @@ function createExtensionManager({
 }
 
 // Maps the runtime modules onto the hook surface the extension manager exposes; tests pass fakes instead.
-function createCore({ localModels, ipc, scheduler, onBattery, llm, settings }) {
+function createCore({ localModels, ipc, scheduler, onBattery, notify, llm, settings }) {
   return {
     index: { records: () => ipc.withStore((store) => structuredClone(store.all())) },
     extract: async (filePath) => ({ content: (await localModels.extractRemote(filePath, settings.get().extraction)).content }),
@@ -503,13 +509,14 @@ function createCore({ localModels, ipc, scheduler, onBattery, llm, settings }) {
     lifecycle: { stopHost: localModels.stopHostIfIdle, dropStore: ipc.dropStore },
     scheduler: { rearm: scheduler.rearm, kickJobs: scheduler.kickJobs },
     power: { onBattery },
+    notify,
   };
 }
 
 let manager = null;
 function getManager() {
   if (manager) return manager;
-  const { app, ipcMain, powerMonitor } = require('electron');
+  const { app, ipcMain, powerMonitor, Notification } = require('electron');
   const settings = require('./settings');
   const { log } = require('./log');
   const ipc = require('./ipc');
@@ -531,6 +538,9 @@ function getManager() {
       ipc,
       scheduler: require('./scheduler'),
       onBattery: () => powerMonitor.isOnBatteryPower(),
+      notify: (title, body) => {
+        if (Notification.isSupported()) new Notification({ title, body }).show();
+      },
     }),
   });
   return manager;

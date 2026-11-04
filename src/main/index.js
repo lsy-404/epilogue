@@ -33,7 +33,9 @@ let quickSearch = null;
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
-  app.on('second-instance', () => openWindow());
+  app.on('second-instance', (_event, argv) => {
+    if (!argv.includes('--epilogue-service')) openWindow();
+  });
 }
 
 // 托盘常驻模式下不预载 UI：窗口只在打开时创建，关闭即销毁，渲染进程内存随之释放
@@ -181,6 +183,7 @@ app.whenReady().then(() => {
   // 登录项静默启动 → 托盘 only；手动启动 → 打开界面；ToS 未同意时必须开窗展示
   const hiddenLaunch =
     process.argv.includes('--hidden') ||
+    process.argv.includes('--epilogue-service') ||
     (process.platform === 'darwin' && app.getLoginItemSettings().wasOpenedAtLogin);
   if (!hiddenLaunch || !settings.get().tosAccepted) openWindow();
   else if (process.platform === 'darwin') app.dock?.hide(); // 静默托盘启动：不占 Dock
