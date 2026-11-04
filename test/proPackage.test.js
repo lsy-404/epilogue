@@ -156,3 +156,55 @@ test('production verifier rejects packages and licenses signed with other keys',
   const forged = buildPackage({ ...keys.extension, kid: 'ext-2026a' });
   assert.throws(() => getProductionVerifier().readZip(forged), (e) => e.code === 'package_signature');
 });
+
+const activateFiles = (code) => ({ 'main.cjs': Buffer.from(code), 'renderer.js': Buffer.from('/* r */') });
+
+test('status is inactive while activate is pending and after it throws, and failed listeners are dropped', async () => {
+  const { manager, handlers } = setup();
+  manager.installPackage(
+    buildPackage(keys.extension, {
+      files: activateFiles(
+        'exports.activate = async (api) => { api.ipc.handle("x", () => 1); api.events.on("app:ready", () => { globalThis.__proRanAfterFailure = true; }); await new Promise((r) => setTimeout(r, 30)); throw Object.assign(new Error("license_kid"), { code: "license_kid" }); };'
+      ),
+    })
+  );
+  const pending = manager.load();
+  assert.equal(manager.status().active, false);
+  assert.equal(manager.rendererSource(), null);
+  const status = await pending;
+  assert.equal(status.active, false);
+  assert.equal(status.loadError, 'license_kid');
+  assert.equal(handlers.has('pro:x'), false);
+  manager.events.emit('app:ready');
+  assert.equal(globalThis.__proRanAfterFailure, undefined);
+});
+
+test('a failed second rename restores the previous copy', () => {
+  const { manager, ext } = setup();
+  manager.installPackage(buildPackage(keys.extension));
+  const real = fs.renameSync;
+  fs.renameSync = (from, to) => {
+    if (String(from).includes('.staging-')) throw Object.assign(new Error('denied'), { code: 'EPERM' });
+    return real(from, to);
+  };
+  try {
+    assert.throws(() => manager.installPackage(buildPackage(keys.extension)), (error) => error.code === 'fs_denied');
+  } finally {
+    fs.renameSync = real;
+  }
+  assert.deepEqual(fs.readdirSync(ext), ['1.0.0']);
+  assert.equal(manager.status().package.version, '1.0.0');
+});
+
+test('filesystem failures surface as ProError codes', () => {
+  const { manager } = setup();
+  assert.throws(() => manager.installPackageFile(path.join(os.tmpdir(), 'missing.epx')), (error) => error.code === 'fs_not_found');
+  assert.throws(() => manager.installPackageFile(os.tmpdir()), (error) => error.code === 'fs_is_directory');
+});
+
+test('a corrupt zip entry is reported as package_zip', () => {
+  const zip = buildPackage(keys.extension);
+  const at = zip.indexOf(Buffer.from('manifest.json')) + 'manifest.json'.length + 2;
+  zip[at] ^= 0xff;
+  assert.throws(() => verifier.readZip(zip), (error) => error.code === 'package_zip' || error.code === 'package_signature');
+});

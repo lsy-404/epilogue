@@ -1512,6 +1512,7 @@ function renderProView() {
     : [[t('pro_f_version'), st.packageError ? proErrorText(st.packageError) : none]]);
   $('#btnProRollback').classList.toggle('hidden', !st.previousVersion);
   $('#btnProRemove').classList.toggle('hidden', !pkg && !st.packageError);
+  $('#btnProRestart').classList.toggle('hidden', !st.restartRequired);
 
   window.dispatchEvent(new CustomEvent('epilogue:slot-render', { detail: { slot: 'pro:panels' } }));
 }
@@ -1533,12 +1534,13 @@ async function refreshPro() {
 
 async function proAction(call, successKey) {
   const res = await call();
-  if (res.canceled) return;
+  if (res.canceled) return false;
   $('#proMessage').textContent = res.ok ? t(successKey) : proErrorText(res.code);
   if (res.ok && res.status) {
     proStatus = res.status;
     renderProView();
   }
+  return res.ok;
 }
 
 let proPreviewTimer = null;
@@ -1585,11 +1587,13 @@ $('#btnProLicenseFile').addEventListener('click', async () => {
   previewProLicense();
 });
 $('#btnProLicenseSave').addEventListener('click', async () => {
-  await proAction(() => api.pro.importLicense($('#proLicenseInput').value), 'pro_saved');
+  const saved = await proAction(() => api.pro.importLicense($('#proLicenseInput').value), 'pro_saved');
+  if (!saved) return;
   $('#proLicenseInput').value = '';
   $('#proLicensePreview').textContent = '';
   $('#btnProLicenseSave').disabled = true;
 });
+$('#btnProRestart').addEventListener('click', () => api.pro.restart());
 $('#btnProLicenseRemove').addEventListener('click', () => proAction(() => api.pro.removeLicense(), 'pro_saved'));
 $('#btnProInstall').addEventListener('click', () => proAction(() => api.pro.installPackage(), 'pro_installed'));
 $('#btnProRollback').addEventListener('click', () => proAction(() => api.pro.rollback(), 'pro_saved'));

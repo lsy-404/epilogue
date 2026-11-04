@@ -70,6 +70,7 @@ contextBridge.exposeInMainWorld('epologue', {
     removeLicense: () => ipcRenderer.invoke('pro-admin:removeLicense'),
     rollback: () => ipcRenderer.invoke('pro-admin:rollback'),
     removePackage: () => ipcRenderer.invoke('pro-admin:removePackage'),
+    restart: () => ipcRenderer.invoke('pro-admin:restart'),
     invoke: (name, ...args) => {
       if (typeof name !== 'string' || !/^[a-z][a-z0-9:-]{0,63}$/.test(name)) {
         return Promise.reject(new Error('Invalid Pro channel name'));

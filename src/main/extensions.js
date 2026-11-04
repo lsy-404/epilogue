@@ -4,7 +4,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const vm = require('node:vm');
 const { builtinModules } = require('node:module');
-const { PRO_API, MANIFEST_NAME, SIGNATURE_NAME, ProError, getProductionVerifier } = require('./proVerify');
+const { PRO_API, MANIFEST_NAME, SIGNATURE_NAME, VERSION, ProError, toProError, getProductionVerifier } = require('./proVerify');
 
 const PRO_SCHEME = 'epilogue-pro';
 const IPC_NAME = /^[a-z][a-z0-9:-]{0,63}$/;
@@ -50,6 +50,30 @@ function removeDir(dir) {
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
+function removeDirQuiet(dir) {
+  try {
+    removeDir(dir);
+  } catch {
+    /* leftovers are pruned on the next install */
+  }
+}
+
+const RETRYABLE_RENAME = new Set(['EPERM', 'EBUSY', 'EACCES']);
+const RENAME_ATTEMPTS = 5;
+
+// Antivirus and indexers briefly hold directories open on Windows, so renames get a short bounded retry.
+function renameRetry(from, to) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      fs.renameSync(from, to);
+      return;
+    } catch (error) {
+      if (attempt >= RENAME_ATTEMPTS || !RETRYABLE_RENAME.has(error.code)) throw error;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 40 * attempt);
+    }
+  }
+}
+
 function createExtensionManager({
   verifier,
   userData,
@@ -66,18 +90,22 @@ function createExtensionManager({
   const extDir = path.join(proDir, 'ext');
   const licenseFile = path.join(proDir, 'license.epl');
   const currentFile = path.join(proDir, 'current.json');
-  const events = createEventBus((event, error) => log('pro', 'event listener failed', { event, message: String(error?.message || error) }));
+  const newBus = () => createEventBus((event, error) => log('pro', 'event listener failed', { event, message: String(error?.message || error) }));
 
-  let loaded = null; // { version, licenseId, renderer: Buffer }
+  let loaded = null; // { version, renderer: Buffer }, set only after activate() resolves
+  let activation = null; // { bus, channels } of the extension currently activating or active
   let loadError = null;
-  let registeredChannels = [];
   let dirty = false;
+
+  const events = Object.freeze({
+    emit: (event, payload) => activation?.bus.emit(event, payload),
+  });
 
   function readCurrentPointer() {
     try {
       const doc = JSON.parse(fs.readFileSync(currentFile, 'utf8'));
-      if (typeof doc.version !== 'string') return null;
-      return { version: doc.version, previous: typeof doc.previous === 'string' ? doc.previous : null };
+      if (typeof doc.version !== 'string' || !VERSION.test(doc.version)) return null;
+      return { version: doc.version, previous: typeof doc.previous === 'string' && VERSION.test(doc.previous) ? doc.previous : null };
     } catch {
       return null;
     }
@@ -130,8 +158,12 @@ function createExtensionManager({
     const trimmed = String(text ?? '').trim();
     if (Buffer.byteLength(trimmed) > MAX_LICENSE_BYTES) throw new ProError('license_format');
     const payload = verifier.verifyLicense(trimmed, { now: now() });
-    fs.mkdirSync(proDir, { recursive: true });
-    writeFileAtomic(licenseFile, trimmed);
+    try {
+      fs.mkdirSync(proDir, { recursive: true });
+      writeFileAtomic(licenseFile, trimmed);
+    } catch (error) {
+      throw toProError(error);
+    }
     dirty = true;
     log('pro', 'license imported', { upd: payload.upd });
     return status();
@@ -161,12 +193,25 @@ function createExtensionManager({
       let replaced = null;
       if (fs.existsSync(target)) {
         replaced = `${target}.old-${crypto.randomBytes(6).toString('hex')}`;
-        fs.renameSync(target, replaced);
+        renameRetry(target, replaced);
       }
-      fs.renameSync(staging, target);
-      if (replaced) removeDir(replaced);
+      try {
+        renameRetry(staging, target);
+      } catch (error) {
+        if (replaced) {
+          try {
+            renameRetry(replaced, target);
+          } catch {
+            /* the old copy stays under its .old name */
+          }
+        }
+        throw error;
+      }
+      if (replaced) removeDirQuiet(replaced);
+    } catch (error) {
+      throw toProError(error);
     } finally {
-      removeDir(staging);
+      removeDirQuiet(staging);
     }
 
     const pointer = readCurrentPointer();
@@ -179,16 +224,21 @@ function createExtensionManager({
   }
 
   function installPackageFile(file) {
-    const size = fs.statSync(file).size;
-    if (size > MAX_PACKAGE_BYTES) throw new ProError('package_size');
-    return installPackage(fs.readFileSync(file));
+    let data;
+    try {
+      if (fs.statSync(file).size > MAX_PACKAGE_BYTES) throw new ProError('package_size');
+      data = fs.readFileSync(file);
+    } catch (error) {
+      throw toProError(error);
+    }
+    return installPackage(data);
   }
 
   function pruneExtDir() {
     const pointer = readCurrentPointer();
     const keep = new Set([pointer?.version, pointer?.previous].filter(Boolean));
     for (const name of fs.readdirSync(extDir)) {
-      if (!keep.has(name)) removeDir(path.join(extDir, name));
+      if (!keep.has(name)) removeDirQuiet(path.join(extDir, name));
     }
   }
 
@@ -244,9 +294,7 @@ function createExtensionManager({
     };
   }
 
-  function buildApi(license) {
-    const channels = [];
-    registeredChannels = channels;
+  function buildApi(license, { bus, channels }) {
     return Object.freeze({
       PRO_API,
       version: coreVersion,
@@ -257,7 +305,7 @@ function createExtensionManager({
         get: () => structuredClone(settings.get()),
         patch: (patch) => structuredClone(settings.patch(patch)),
       }),
-      events: Object.freeze({ on: events.on, off: events.off, emit: events.emit }),
+      events: Object.freeze({ on: bus.on, off: bus.off, emit: bus.emit }),
       ipc: Object.freeze({
         handle(name, fn) {
           if (typeof name !== 'string' || !IPC_NAME.test(name) || typeof fn !== 'function') {
@@ -272,7 +320,7 @@ function createExtensionManager({
   }
 
   async function load() {
-    loaded = null;
+    deactivate();
     loadError = null;
     const { payload: license, error: licenseError } = currentLicense();
     if (!license) {
@@ -290,28 +338,34 @@ function createExtensionManager({
       const mod = { exports: {} };
       fn.call(mod.exports, mod.exports, restrictedRequire, mod);
       if (typeof mod.exports.activate !== 'function') throw new ProError('activate_missing');
-      loaded = { version: manifest.version, renderer: files.get(manifest.entries.renderer) };
+      const renderer = files.get(manifest.entries.renderer);
+      const current = { bus: newBus(), channels: [] };
+      activation = current;
       try {
-        await mod.exports.activate(buildApi(license));
+        await mod.exports.activate(buildApi(license, current));
       } catch (error) {
-        deactivate();
+        if (activation === current) deactivate();
         throw error;
       }
+      if (activation !== current) throw new ProError('activate_failed');
+      loaded = { version: manifest.version, renderer };
       dirty = false;
       log('pro', 'extension active', { version: manifest.version });
     } catch (error) {
       loaded = null;
-      loadError = error.code || 'activate_failed';
+      loadError = typeof error?.code === 'string' && /^[a-z_]+$/.test(error.code) ? error.code : 'activate_failed';
       log('pro', 'extension failed to load', { code: loadError, message: String(error?.message || error).slice(0, 200) });
     }
     return status();
   }
 
   function deactivate() {
-    if (loaded) events.emit('pro:deactivate');
-    for (const channel of registeredChannels) ipcRemove(channel);
-    registeredChannels = [];
+    const current = activation;
+    activation = null;
     loaded = null;
+    if (!current) return;
+    current.bus.emit('pro:deactivate');
+    for (const channel of current.channels) ipcRemove(channel);
   }
 
   function rendererSource() {

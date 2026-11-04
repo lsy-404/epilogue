@@ -4,6 +4,7 @@ const { ipcMain, dialog, shell, app, clipboard } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const settings = require('./settings');
+const { toProError } = require('./proVerify');
 const { isTrustedIpcEvent } = require('./runtimeSecurity');
 
 const lazy = {
@@ -112,7 +113,7 @@ function registerProAdmin(handle) {
     try {
       return { ok: true, ...(await fn()) };
     } catch (error) {
-      return { ok: false, code: error.code || 'unknown' };
+      return { ok: false, code: toProError(error).code };
     }
   };
   const pickFile = async (name, extensions) => {
@@ -140,6 +141,12 @@ function registerProAdmin(handle) {
   handle('pro-admin:removeLicense', () => run(() => ({ status: manager().removeLicense() })));
   handle('pro-admin:rollback', () => run(() => ({ status: manager().rollback() })));
   handle('pro-admin:removePackage', () => run(() => ({ status: manager().removePackage() })));
+  handle('pro-admin:restart', () => {
+    store?.flush();
+    manager().deactivate();
+    app.relaunch();
+    app.exit(0);
+  });
 }
 
 function register(getWindow, hooks = {}) {

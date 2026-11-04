@@ -25,6 +25,23 @@ class ProError extends Error {
   }
 }
 
+const FS_CODES = {
+  ENOENT: 'fs_not_found',
+  EISDIR: 'fs_is_directory',
+  EPERM: 'fs_denied',
+  EACCES: 'fs_denied',
+  EBUSY: 'fs_denied',
+  ENOSPC: 'fs_no_space',
+};
+
+// Normalizes filesystem and unexpected errors into ProError codes the UI can translate.
+function toProError(error) {
+  if (error instanceof ProError) return error;
+  const fsCode = typeof error?.code === 'string' ? error.code : '';
+  const code = FS_CODES[fsCode] || (/^E[A-Z]+$/.test(fsCode) ? 'fs_failed' : 'unknown');
+  return new ProError(code, `${code}: ${String(error?.message || error).slice(0, 200)}`);
+}
+
 function isIsoDate(value) {
   if (typeof value !== 'string' || !ISO_DATE.test(value)) return false;
   const d = new Date(`${value}T00:00:00Z`);
@@ -53,7 +70,9 @@ function parseJson(buffer, code) {
 function compileKeys(table) {
   const keys = new Map();
   for (const [kid, b64] of Object.entries(table || {})) {
-    keys.set(kid, crypto.createPublicKey({ key: Buffer.from(b64, 'base64'), format: 'der', type: 'spki' }));
+    const key = crypto.createPublicKey({ key: Buffer.from(b64, 'base64'), format: 'der', type: 'spki' });
+    if (key.asymmetricKeyType !== 'ed25519') throw new Error(`key '${kid}' is not an Ed25519 public key`);
+    keys.set(kid, key);
   }
   return keys;
 }
@@ -150,6 +169,13 @@ function createVerifier({ extensionKeys = {}, licenseKeys = {} } = {}) {
     } catch {
       throw new ProError('package_zip');
     }
+    const getData = (entry) => {
+      try {
+        return entry.getData();
+      } catch {
+        throw new ProError('package_zip');
+      }
+    };
     if (zipEntries.length > MAX_ENTRIES + 2) throw new ProError('package_zip');
     const raw = new Map();
     let declared = 0;
@@ -167,10 +193,13 @@ function createVerifier({ extensionKeys = {}, licenseKeys = {} } = {}) {
     const manifestEntry = raw.get(MANIFEST_NAME);
     const sigEntry = raw.get(SIGNATURE_NAME);
     if (!manifestEntry || !sigEntry) throw new ProError('package_file_missing');
-    const manifestBytes = manifestEntry.getData();
-    const sigBytes = sigEntry.getData();
+    const manifestBytes = getData(manifestEntry);
+    const sigBytes = getData(sigEntry);
     if (manifestBytes.length > 1 << 20 || sigBytes.length > 1 << 16) throw new ProError('package_size');
-    const result = verifyBundle(manifestBytes, sigBytes, (name) => raw.get(name)?.getData());
+    const result = verifyBundle(manifestBytes, sigBytes, (name) => {
+      const entry = raw.get(name);
+      return entry ? getData(entry) : undefined;
+    });
     for (const name of raw.keys()) {
       if (name !== MANIFEST_NAME && name !== SIGNATURE_NAME && !Object.hasOwn(result.manifest.files, name)) {
         throw new ProError('package_unlisted');
@@ -198,7 +227,9 @@ module.exports = {
   PRO_API,
   MANIFEST_NAME,
   SIGNATURE_NAME,
+  VERSION,
   ProError,
+  toProError,
   createVerifier,
   getProductionVerifier,
   isIsoDate,
