@@ -195,7 +195,7 @@ test('the api object exposes exactly the documented members', async () => {
   assert.deepEqual(shape(api.lifecycle), ['dropStore', 'stopHost']);
   assert.deepEqual(shape(api.scheduler), ['onTick', 'rearm', 'setIntervalFilter']);
   assert.deepEqual(shape(api.index), ['onIndexed', 'onMoved', 'onRemoved', 'records']);
-  assert.deepEqual(shape(api.search), ['registerMode']);
+  assert.deepEqual(shape(api.search), ['registerMode', 'spaceHits']);
   assert.deepEqual(shape(api.assistant), ['registerTools']);
   assert.deepEqual(shape(api.power), ['onBattery']);
   mgr.deactivate();

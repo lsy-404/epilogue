@@ -395,7 +395,7 @@ test('the api exposes the deep hooks and a failing listener is logged without br
   assert.equal(typeof seen.api.extract, 'function');
   assert.equal(typeof seen.api.embedLocal, 'function');
   assert.equal(typeof seen.api.chat, 'function');
-  assert.deepEqual(Object.keys(seen.api.search), ['registerMode']);
+  assert.deepEqual(Object.keys(seen.api.search), ['registerMode', 'spaceHits']);
   assert.deepEqual(Object.keys(seen.api.assistant), ['registerTools']);
   assert.deepEqual(Object.keys(seen.api.scheduler).sort(), ['onTick', 'rearm', 'setIntervalFilter']);
   assert.deepEqual(kicks, [1]);
@@ -561,4 +561,28 @@ test('the recall view ships exactly three static mode buttons', () => {
   const seg = html.slice(start, html.indexOf('</div>', start));
   assert.equal((seg.match(/<button/g) || []).length, 3);
   assert.ok(!seg.includes('deep'));
+});
+
+test('spaceHits ranks records of a registered vector space for a text query', async (t) => {
+  t.after(() => hooks.reset());
+  const records = [
+    { id: 'i_red', filePath: '/red.png' },
+    { id: 'i_blue', filePath: '/blue.png' },
+  ];
+  const calls = [];
+  const store = {
+    searchByVector(vector, topK, space) {
+      calls.push({ vector, topK, space });
+      return records.map((record, i) => ({ record, score: 0.9 - i * 0.1 }));
+    },
+  };
+  const core = createCore({ ipc: { withStore: (fn) => fn(store) }, localModels: {}, scheduler: {} });
+  assert.deepEqual(await core.search.spaceHits('image:clip', '红色', 5), []);
+  hooks.registerVectorSpace({ id: 'image:clip', kinds: ['image'], embedFile: async () => null, embedQuery: async (text) => (text ? [1, 0] : null) });
+  assert.deepEqual(await core.search.spaceHits('image:clip', '红色', 5), [
+    { id: 'i_red', filePath: '/red.png', score: 0.9 },
+    { id: 'i_blue', filePath: '/blue.png', score: 0.8 },
+  ]);
+  assert.deepEqual(calls, [{ vector: [1, 0], topK: 5, space: 'image:clip' }]);
+  assert.deepEqual(await core.search.spaceHits('image:clip', '', 5), []);
 });

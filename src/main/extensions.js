@@ -368,7 +368,13 @@ function createExtensionManager({
         }
         return (core.embedLocal ?? unavailable)(texts);
       },
-      search: Object.freeze({ registerMode: hooks.registerMode }),
+      search: Object.freeze({
+        registerMode: hooks.registerMode,
+        spaceHits(spaceId, text, topK = 20) {
+          if (typeof spaceId !== 'string' || typeof text !== 'string') throw new Error('spaceId and text must be strings');
+          return (core.search?.spaceHits ?? unavailable)(spaceId, text, Math.max(1, Math.min(100, Math.floor(Number(topK)) || 20)));
+        },
+      }),
       assistant: Object.freeze({ registerTools: hooks.registerTools }),
       chat(messages, opts = {}) {
         if (!Array.isArray(messages) || !messages.length || !messages.every((m) => CHAT_ROLES.has(m?.role) && typeof m.content === 'string')) {
@@ -485,6 +491,14 @@ function createCore({ localModels, ipc, scheduler, onBattery, llm, settings }) {
       return { model: provider.model, dim: vectors[0]?.length ?? 0, vectors };
     },
     chat: (...args) => llm.chatF(...args),
+    search: {
+      async spaceHits(spaceId, text, topK) {
+        const space = hooks.vectorSpaces().find((s) => s.id === spaceId);
+        const vector = space ? await space.embedQuery(text) : null;
+        if (!vector) return [];
+        return ipc.withStore((store) => store.searchByVector(vector, topK, spaceId).map((h) => ({ id: h.record.id, filePath: h.record.filePath, score: h.score })));
+      },
+    },
     modelHost: { setModule: localModels.setHostModule, call: localModels.hostCall, pid: localModels.hostPid },
     lifecycle: { stopHost: localModels.stopHostIfIdle, dropStore: ipc.dropStore },
     scheduler: { rearm: scheduler.rearm, kickJobs: scheduler.kickJobs },
