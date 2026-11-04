@@ -52,7 +52,9 @@ function parseJson(buffer, code) {
 
 function compileKeys(table) {
   const keys = new Map();
-  for (const [kid, pem] of Object.entries(table || {})) keys.set(kid, crypto.createPublicKey(pem));
+  for (const [kid, b64] of Object.entries(table || {})) {
+    keys.set(kid, crypto.createPublicKey({ key: Buffer.from(b64, 'base64'), format: 'der', type: 'spki' }));
+  }
   return keys;
 }
 

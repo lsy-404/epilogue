@@ -148,9 +148,11 @@ test('extension code only gets node built-ins', async () => {
   assert.equal(status.loadError, 'activate_failed');
 });
 
-test('production verifier with empty key tables rejects every package and license', () => {
+test('production verifier rejects packages and licenses signed with other keys', () => {
   const { manager } = setup({ upd: null, verifierOverride: getProductionVerifier() });
   rejects(manager, buildPackage(keys.extension), 'license_required');
   assert.throws(() => manager.importLicense(signLicense(keys.license)), (e) => e.code === 'license_kid');
   assert.throws(() => getProductionVerifier().readZip(buildPackage(keys.extension)), (e) => e.code === 'package_kid');
+  const forged = buildPackage({ ...keys.extension, kid: 'ext-2026a' });
+  assert.throws(() => getProductionVerifier().readZip(forged), (e) => e.code === 'package_signature');
 });

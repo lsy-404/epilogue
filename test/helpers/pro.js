@@ -4,7 +4,7 @@ const AdmZip = require('adm-zip');
 
 function makeKeyPair(kid) {
   const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
-  return { kid, privateKey, publicPem: publicKey.export({ type: 'spki', format: 'pem' }) };
+  return { kid, privateKey, publicB64: publicKey.export({ type: 'spki', format: 'der' }).toString('base64') };
 }
 
 function makeKeys() {
@@ -14,8 +14,8 @@ function makeKeys() {
     extension,
     license,
     verifierKeys: {
-      extensionKeys: { [extension.kid]: extension.publicPem },
-      licenseKeys: { [license.kid]: license.publicPem },
+      extensionKeys: { [extension.kid]: extension.publicB64 },
+      licenseKeys: { [license.kid]: license.publicB64 },
     },
   };
 }

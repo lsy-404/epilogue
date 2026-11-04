@@ -61,9 +61,12 @@ test('feature date coverage includes the update date itself', () => {
   assert.throws(() => verifier.checkCompatibility(manifest('2027-12-02'), license), (e) => e.code === 'package_feature_date');
 });
 
-test('the production verifier has no trusted keys and rejects everything', () => {
+test('the production verifier trusts only its fixed kids and rejects test-key licenses', () => {
   const production = getProductionVerifier();
+  const table = require('../src/main/proKeys');
+  assert.deepEqual(Object.keys(table.extensionKeys), ['ext-2026a']);
+  assert.deepEqual(Object.keys(table.licenseKeys), ['lic-2026a']);
   assert.throws(() => production.verifyLicense(signLicense(keys.license)), (e) => e.code === 'license_kid');
-  assert.deepEqual(require('../src/main/proKeys').extensionKeys, {});
-  assert.deepEqual(require('../src/main/proKeys').licenseKeys, {});
+  const forged = signLicense({ ...keys.license, kid: 'lic-2026a' });
+  assert.throws(() => production.verifyLicense(forged), (e) => e.code === 'license_signature');
 });
