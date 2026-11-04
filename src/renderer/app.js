@@ -161,6 +161,7 @@ function applyI18n() {
   for (const el of document.querySelectorAll('[data-i18n-ph]')) el.placeholder = t(el.dataset.i18nPh);
   for (const el of document.querySelectorAll('[data-i18n-html]')) el.innerHTML = t(el.dataset.i18nHtml);
   syncSelectProxies();
+  renderProView();
 }
 
 /* ---------- 导航 ---------- */
@@ -1454,6 +1455,146 @@ async function maybeShowTos() {
   $('#tosDecline').addEventListener('click', () => window.close());
 }
 
+/* ---------- Pro ---------- */
+let proStatus = null;
+let proScriptLoaded = false;
+
+function proErrorText(code) {
+  const key = `pro_err_${code}`;
+  const text = t(key);
+  return text === key ? t('pro_err_unknown') : text;
+}
+
+function proFacts(container, rows) {
+  container.replaceChildren();
+  for (const [label, value] of rows) {
+    const l = document.createElement('span');
+    l.className = 'pro-fact-label';
+    l.textContent = label;
+    const v = document.createElement('span');
+    v.textContent = value;
+    container.append(l, v);
+  }
+}
+
+function renderProView() {
+  const st = proStatus;
+  if (!st) return;
+  const none = t('pro_none');
+  let state;
+  if (st.active) state = t('pro_state_active');
+  else if (!st.license.valid) state = st.license.installed ? t('pro_license_stored_invalid', { msg: proErrorText(st.license.error) }) : t('pro_state_nolicense');
+  else if (!st.package) state = t('pro_state_nopkg');
+  else if (st.loadError) state = t('pro_state_failed', { msg: proErrorText(st.loadError) });
+  else state = t('pro_state_inactive');
+  if (st.restartRequired) state += ` · ${t('pro_state_restart')}`;
+
+  const licenseRows = [[t('pro_f_state'), state]];
+  if (st.license.valid) {
+    licenseRows.push(
+      [t('pro_f_licensee'), st.license.name || t('pro_unnamed')],
+      [t('pro_f_sku'), st.license.sku],
+      [t('pro_f_updates'), st.license.upd]
+    );
+    if (st.license.exp) licenseRows.push([t('pro_f_expiry'), st.license.exp]);
+  }
+  proFacts($('#proLicenseFacts'), licenseRows);
+  $('#btnProLicenseRemove').classList.toggle('hidden', !st.license.valid && !st.license.installed);
+
+  const pkg = st.package;
+  proFacts($('#proPackageFacts'), pkg
+    ? [
+        [t('pro_f_version'), pkg.version],
+        [t('pro_f_feature'), pkg.featureDate],
+        [t('pro_f_coverage'), pkg.covered === false ? t('pro_cov_out') : pkg.covered ? t('pro_cov_ok') : none],
+        [t('pro_f_previous'), st.previousVersion || none],
+      ]
+    : [[t('pro_f_version'), st.packageError ? proErrorText(st.packageError) : none]]);
+  $('#btnProRollback').classList.toggle('hidden', !st.previousVersion);
+  $('#btnProRemove').classList.toggle('hidden', !pkg && !st.packageError);
+
+  window.dispatchEvent(new CustomEvent('epilogue:slot-render', { detail: { slot: 'pro:panels' } }));
+}
+
+function loadProRenderer() {
+  if (proScriptLoaded || !proStatus?.active) return;
+  proScriptLoaded = true;
+  const script = document.createElement('script');
+  script.src = 'epilogue-pro://ext/renderer.js';
+  script.onload = renderProView;
+  document.head.append(script);
+}
+
+async function refreshPro() {
+  proStatus = await api.pro.status();
+  renderProView();
+  loadProRenderer();
+}
+
+async function proAction(call, successKey) {
+  const res = await call();
+  if (res.canceled) return;
+  $('#proMessage').textContent = res.ok ? t(successKey) : proErrorText(res.code);
+  if (res.ok && res.status) {
+    proStatus = res.status;
+    renderProView();
+  }
+}
+
+let proPreviewTimer = null;
+function previewProLicense() {
+  clearTimeout(proPreviewTimer);
+  proPreviewTimer = setTimeout(async () => {
+    const text = $('#proLicenseInput').value.trim();
+    const hint = $('#proLicensePreview');
+    $('#btnProLicenseSave').disabled = true;
+    if (!text) {
+      hint.textContent = '';
+      return;
+    }
+    const res = await api.pro.previewLicense(text);
+    hint.textContent = res.ok
+      ? t('pro_preview', { name: res.info.name || t('pro_unnamed'), upd: res.info.upd })
+      : t('pro_license_invalid', { msg: proErrorText(res.code) });
+    $('#btnProLicenseSave').disabled = !res.ok;
+  }, 200);
+}
+
+$('#proLicenseInput').addEventListener('input', previewProLicense);
+$('#proLicenseInput').addEventListener('dragover', (event) => {
+  event.preventDefault();
+  event.currentTarget.classList.add('dragover');
+});
+$('#proLicenseInput').addEventListener('dragleave', (event) => event.currentTarget.classList.remove('dragover'));
+$('#proLicenseInput').addEventListener('drop', async (event) => {
+  event.preventDefault();
+  event.currentTarget.classList.remove('dragover');
+  const file = event.dataTransfer.files[0];
+  if (!file || file.size > 4096) return;
+  $('#proLicenseInput').value = (await file.text()).trim();
+  previewProLicense();
+});
+$('#btnProLicenseFile').addEventListener('click', async () => {
+  const res = await api.pro.importLicenseFile();
+  if (res.canceled) return;
+  if (!res.ok) {
+    $('#proLicensePreview').textContent = t('pro_license_invalid', { msg: proErrorText(res.code) });
+    return;
+  }
+  $('#proLicenseInput').value = res.text;
+  previewProLicense();
+});
+$('#btnProLicenseSave').addEventListener('click', async () => {
+  await proAction(() => api.pro.importLicense($('#proLicenseInput').value), 'pro_saved');
+  $('#proLicenseInput').value = '';
+  $('#proLicensePreview').textContent = '';
+  $('#btnProLicenseSave').disabled = true;
+});
+$('#btnProLicenseRemove').addEventListener('click', () => proAction(() => api.pro.removeLicense(), 'pro_saved'));
+$('#btnProInstall').addEventListener('click', () => proAction(() => api.pro.installPackage(), 'pro_installed'));
+$('#btnProRollback').addEventListener('click', () => proAction(() => api.pro.rollback(), 'pro_saved'));
+$('#btnProRemove').addEventListener('click', () => proAction(() => api.pro.removePackage(), 'pro_saved'));
+
 /* ---------- 关于 ---------- */
 api.appVersion().then((v) => {
   $('#aboutVersion').textContent = `v${v.version} · Electron ${v.electron}`;
@@ -1486,6 +1627,7 @@ $('#tosClose').addEventListener('click', () => {
   applyI18n();
   maybeShowTos();
   loadSettingsForm(currentSettings);
+  refreshPro();
   reportNetwork();
   // 云盘等特殊文件夹后台静默检测记录（清理回退目标依赖 Downloads/Desktop）
   if (!currentSettings.recordedFolders.length) currentSettings.recordedFolders = await api.detectFolders();

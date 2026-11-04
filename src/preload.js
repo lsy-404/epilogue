@@ -61,6 +61,22 @@ contextBridge.exposeInMainWorld('epologue', {
   clearLog: () => ipcRenderer.invoke('log:clear'),
   storageStats: () => ipcRenderer.invoke('storage:stats'),
   storageCleanKind: (kind) => ipcRenderer.invoke('storage:cleanKind', kind),
+  pro: {
+    status: () => ipcRenderer.invoke('pro-admin:status'),
+    previewLicense: (text) => ipcRenderer.invoke('pro-admin:previewLicense', text),
+    importLicense: (text) => ipcRenderer.invoke('pro-admin:importLicense', text),
+    importLicenseFile: () => ipcRenderer.invoke('pro-admin:importLicenseFile'),
+    installPackage: () => ipcRenderer.invoke('pro-admin:installPackage'),
+    removeLicense: () => ipcRenderer.invoke('pro-admin:removeLicense'),
+    rollback: () => ipcRenderer.invoke('pro-admin:rollback'),
+    removePackage: () => ipcRenderer.invoke('pro-admin:removePackage'),
+    invoke: (name, ...args) => {
+      if (typeof name !== 'string' || !/^[a-z][a-z0-9:-]{0,63}$/.test(name)) {
+        return Promise.reject(new Error('Invalid Pro channel name'));
+      }
+      return ipcRenderer.invoke(`pro:${name}`, ...args);
+    },
+  },
   onIndexProgress: (cb) => {
     const listener = (_e, p) => cb(p);
     ipcRenderer.on('index:progress', listener);

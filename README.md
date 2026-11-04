@@ -54,6 +54,10 @@ bash scripts/pack.sh [platform] [arch]   # 本地打包
 - 使用 AI 功能时，相关文件内容会发送至**你配置（或内置默认）的服务商**，受其各自隐私政策约束；高度敏感文件请勿使用 AI 功能。
 - 许可：**ALE 1.1（反劳动剥削许可证，优先适用）& GPL-3.0**——GPL 权利以 ALE 合规为条件，ALE 的约束主要作用于商业与用工实体。条款与许可证全文均内置于应用（设置 → 关于）。
 
+## 参与贡献
+
+欢迎通过 Issue 反馈问题与建议；本项目不接受 Pull Request。
+
 ### 固定的 model-auth 依赖
 
 `@model-auth/core`、`@model-auth/providers` 和 `@model-auth/vue` 使用 Platform Kit 的独立版本发布包，由 `pnpm-lock.yaml` 固定下载地址和 SHA-512 完整性校验。运行 `node test/public-model-auth.test.mjs` 可核对安装版本、许可证、导入接口与锁文件。

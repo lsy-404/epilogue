@@ -636,6 +636,13 @@ select:focus { border-color: var(--gold); }
 .about-actions { display: flex; justify-content: center; margin-bottom: 1rem; }
 .about-license { margin-top: 0.4rem; }
 
+/* ---------- Pro settings ---------- */
+.pro-facts { display: grid; grid-template-columns: max-content 1fr; gap: 0.35rem 1.2rem; margin-bottom: 0.9rem; font-size: 0.86rem; }
+.pro-facts dt, .pro-facts .pro-fact-label { color: var(--text-dim); }
+.pro-license-input { width: 100%; font-family: var(--font-mono); font-size: 0.74rem; line-height: 1.5; word-break: break-all; }
+.pro-license-input.dragover { border-color: var(--gold); }
+.pro-actions { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-top: 0.8rem; }
+
 /* ---------- ToS ---------- */
 .tos-overlay {
   position: fixed;

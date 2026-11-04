@@ -1,5 +1,5 @@
 'use strict';
-const { app, BrowserWindow, Tray, Menu, nativeImage } = require('electron');
+const { app, BrowserWindow, Tray, Menu, nativeImage, protocol } = require('electron');
 const path = require('path');
 const settings = require('./settings');
 const ipc = require('./ipc');
@@ -7,6 +7,10 @@ const scheduler = require('./scheduler');
 const { makeT } = require('../shared/locales');
 const { isTrustedRendererNavigation } = require('./runtimeSecurity');
 const { createQuickSearch } = require('./quickSearch');
+const extensions = require('./extensions');
+
+// Must run before app ready; the scheme only serves the verified Pro renderer bundle.
+protocol.registerSchemesAsPrivileged([{ scheme: extensions.PRO_SCHEME, privileges: { standard: true, secure: true } }]);
 
 app.commandLine.appendSwitch('js-flags', '--max-old-space-size=512');
 // Fluent/Acrylic surfaces need GPU compositing; keep an escape hatch for broken GPU drivers.
@@ -160,6 +164,10 @@ app.whenReady().then(() => {
   scheduler.start({ openWindow, getWindow: () => win });
   applyAppSettings(settings.get());
 
+  const pro = extensions.getManager();
+  protocol.handle(extensions.PRO_SCHEME, (request) => pro.handleProtocol(request));
+  pro.load().then(() => pro.events.emit('app:ready'));
+
   // 登录项静默启动 → 托盘 only；手动启动 → 打开界面；ToS 未同意时必须开窗展示
   const hiddenLaunch =
     process.argv.includes('--hidden') ||
@@ -170,7 +178,11 @@ app.whenReady().then(() => {
   app.on('activate', () => openWindow());
 });
 
-app.on('before-quit', () => ipc.flushStore()); // 向量库写盘已防抖，退出前兜底落盘
+// 向量库写盘已防抖，退出前兜底落盘
+app.on('before-quit', () => {
+  ipc.flushStore();
+  extensions.getManager().deactivate();
+});
 
 app.on('window-all-closed', () => {
   // 托盘驻留：窗口全关也不退出（渲染进程已销毁，内存已释放）

@@ -54,6 +54,10 @@ Pushing a stable `vX.Y.Z` tag builds source packages for each platform and submi
 - When you use AI features, relevant file content is sent to **the providers you configure (or the built-in defaults)**, governed by their own privacy policies; avoid AI features on highly sensitive files.
 - License: **ALE 1.1 (Anti-Labor Exploitation License, prevailing) & GPL-3.0** — GPL rights are conditional on ALE compliance; ALE's restrictions apply primarily to commercial and employing entities. Full terms and license texts are bundled in-app (Settings → About).
 
+## Contributing
+
+Issues are welcome. Pull requests are not accepted.
+
 ### Pinned model-auth dependencies
 
 `@model-auth/core`, `@model-auth/providers`, and `@model-auth/vue` use independently versioned Platform Kit release packages. `pnpm-lock.yaml` pins their download URLs and SHA-512 integrity checks. Run `node test/public-model-auth.test.mjs` to verify installed versions, licenses, imports, and lockfile entries.

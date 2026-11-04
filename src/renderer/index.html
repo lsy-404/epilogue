@@ -2,7 +2,7 @@
 <html lang="zh">
 <head>
   <meta charset="UTF-8" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' epilogue-pro:; style-src 'self' 'unsafe-inline'; img-src 'self' data:;" />
   <title>Epilogue</title>
   <script src="theme.js"></script>
   <link rel="stylesheet" href="styles.css" />
@@ -194,6 +194,7 @@
         <button class="tab-btn active" data-tab="general" data-i18n="tab_general"></button>
         <button class="tab-btn" data-tab="capabilities" data-i18n="tab_capabilities"></button>
         <button class="tab-btn" data-tab="extraction" data-i18n="tab_extraction"></button>
+        <button class="tab-btn" data-tab="pro" data-i18n="tab_pro"></button>
         <button class="tab-btn" data-tab="about" data-i18n="tab_about"></button>
       </div>
 
@@ -271,6 +272,33 @@
           </div>
           <p class="hint" data-i18n="ext_hint"></p>
         </div>
+      </div>
+
+      <div class="tab-page hidden" id="tab-pro">
+        <div class="panel">
+          <div class="panel-head"><h2 data-i18n="pro_license_title"></h2></div>
+          <div class="pro-facts" id="proLicenseFacts"></div>
+          <textarea id="proLicenseInput" class="pro-license-input" rows="3" spellcheck="false" data-i18n-ph="pro_license_ph"></textarea>
+          <p class="hint" id="proLicensePreview"></p>
+          <div class="pro-actions">
+            <button class="btn ghost" id="btnProLicenseFile" data-i18n="pro_license_file"></button>
+            <button class="btn" id="btnProLicenseSave" data-i18n="pro_license_save" disabled></button>
+            <button class="btn ghost hidden" id="btnProLicenseRemove" data-i18n="pro_license_remove"></button>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head"><h2 data-i18n="pro_pkg_title"></h2></div>
+          <div class="pro-facts" id="proPackageFacts"></div>
+          <div class="pro-actions">
+            <button class="btn ghost" id="btnProInstall" data-i18n="pro_pkg_install"></button>
+            <button class="btn ghost hidden" id="btnProRollback" data-i18n="pro_pkg_rollback"></button>
+            <button class="btn ghost hidden" id="btnProRemove" data-i18n="pro_pkg_remove"></button>
+          </div>
+          <p class="hint" id="proMessage"></p>
+        </div>
+
+        <div data-ext-slot="pro:panels"></div>
       </div>
 
       <div class="tab-page hidden" id="tab-about">

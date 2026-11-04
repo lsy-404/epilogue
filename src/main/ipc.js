@@ -1,6 +1,7 @@
 'use strict';
 // 重模块在 handler 内按需加载，减少托盘启动开销。
 const { ipcMain, dialog, shell, app, clipboard } = require('electron');
+const fs = require('fs');
 const path = require('path');
 const settings = require('./settings');
 const { isTrustedIpcEvent } = require('./runtimeSecurity');
@@ -13,6 +14,8 @@ const lazy = {
 };
 
 let store;
+let trustedGate = null;
+let settingsChanged = null;
 const modelAuthOperations = new Map();
 
 function getStore() {
@@ -91,6 +94,54 @@ async function search(s, question, mode) {
   return { answer, hits: hits.map((h) => ({ ...h.record, vector: undefined, score: h.score })), mode: usedMode };
 }
 
+function handleTrusted(channel, listener) {
+  if (!trustedGate) throw new Error('IPC is not ready');
+  return trustedGate(channel, listener);
+}
+
+function applySettingsPatch(patch) {
+  const cfg = settings.set(patch);
+  settingsChanged?.(cfg);
+  return cfg;
+}
+
+// Pro management runs in the open-source core and works with Pro inactive; errors come back as codes for the UI.
+function registerProAdmin(handle) {
+  const manager = () => require('./extensions').getManager();
+  const run = async (fn) => {
+    try {
+      return { ok: true, ...(await fn()) };
+    } catch (error) {
+      return { ok: false, code: error.code || 'unknown' };
+    }
+  };
+  const pickFile = async (name, extensions) => {
+    const r = await dialog.showOpenDialog({ properties: ['openFile'], filters: [{ name, extensions }] });
+    return r.canceled ? null : r.filePaths[0];
+  };
+  handle('pro-admin:status', () => manager().status());
+  handle('pro-admin:previewLicense', (_e, text) => run(() => ({ info: manager().previewLicense(text) })));
+  handle('pro-admin:importLicense', (_e, text) => run(() => ({ status: manager().importLicense(text) })));
+  handle('pro-admin:importLicenseFile', () =>
+    run(async () => {
+      const file = await pickFile('Epilogue Pro license', ['epl', 'txt']);
+      if (!file) return { canceled: true };
+      if (fs.statSync(file).size > 4096) throw Object.assign(new Error('license_format'), { code: 'license_format' });
+      const text = fs.readFileSync(file, 'utf8').trim();
+      return { text, info: manager().previewLicense(text) };
+    })
+  );
+  handle('pro-admin:installPackage', () =>
+    run(async () => {
+      const file = await pickFile('Epilogue Pro package', ['epx']);
+      return file ? { status: manager().installPackageFile(file) } : { canceled: true };
+    })
+  );
+  handle('pro-admin:removeLicense', () => run(() => ({ status: manager().removeLicense() })));
+  handle('pro-admin:rollback', () => run(() => ({ status: manager().rollback() })));
+  handle('pro-admin:removePackage', () => run(() => ({ status: manager().removePackage() })));
+}
+
 function register(getWindow, hooks = {}) {
   const progress = (channel) => (p) => getWindow()?.webContents.send(channel, p);
   // All exposed APIs can touch local files, settings, credentials or the network.
@@ -100,6 +151,8 @@ function register(getWindow, hooks = {}) {
       if (!isTrustedIpcEvent(event, getWindow)) throw new Error('Rejected untrusted IPC sender');
       return listener(event, ...args);
     });
+  trustedGate = handle;
+  settingsChanged = hooks.onSettingsChanged;
   const handleStore = (channel, listener) =>
     handle(channel, (...args) => withStore((s) => listener(s, ...args)));
 
@@ -318,6 +371,8 @@ function register(getWindow, hooks = {}) {
     return lazy.llm.listModels(provider);
   });
 
+  registerProAdmin(handle);
+
   handle('shell:reveal', (_e, p) => shell.showItemInFolder(p));
   handle('clipboard:write', (_e, value) => clipboard.writeText(String(value || '')));
 
@@ -329,7 +384,7 @@ function register(getWindow, hooks = {}) {
   handle('app:doc', (_e, name) => {
     const file = DOCS[name];
     if (!file) throw new Error('unknown doc');
-    return require('fs').readFileSync(path.join(app.getAppPath(), file), 'utf8');
+    return fs.readFileSync(path.join(app.getAppPath(), file), 'utf8');
   });
 
   // 诊断日志：在文件管理器中定位 userData/logs/epilogue.log
@@ -340,7 +395,6 @@ function register(getWindow, hooks = {}) {
   });
 
   // 存储占用：索引 / 日志 / 模型 / 应用本体
-  const fs = require('fs');
   function dirSizeSafe(dir) {
     let total = 0;
     try {
@@ -395,4 +449,4 @@ function register(getWindow, hooks = {}) {
 }
 
 // ask/getStore 供 assistant 复用；flushStore 供退出前落盘（向量库写盘已防抖）
-module.exports = { register, ask, getStore, withStore, flushStore: () => store?.flush() };
+module.exports = { register, handleTrusted, applySettingsPatch, ask, getStore, withStore, flushStore: () => store?.flush() };
